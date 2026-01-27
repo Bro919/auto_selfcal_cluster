@@ -48,16 +48,23 @@ def main():
     urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
     print("\nDownload complete.")
     
-    # Verify the tar file exists
+    # Verify the tar file exists and is valid
     if not tar_path.exists():
         sys.exit(f"Error: Tar file was not downloaded successfully at {tar_path}")
     
+    # Check if file is a valid tar archive
+    if not tarfile.is_tarfile(str(tar_path)):
+        sys.exit(f"Error: Downloaded file at {tar_path} is not a valid tar archive. The download may have been incomplete or corrupted.")
+    
     # Extract the tar file
-    with tarfile.open(str(tar_path), "r:*") as tar:
-        tar.extractall(path=workdir_path)
+    try:
+        with tarfile.open(str(tar_path), "r:*") as tar:
+            tar.extractall(path=workdir_path)
+    except tarfile.ReadError as e:
+        sys.exit(f"Error: Failed to extract tar file: {e}")
 
     # Find extracted directory
-    extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != args.template]
+    extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != args.asc]
 
     if len(extracted_dirs) != 1:
         print("Error: Expected exactly one extracted directory.")

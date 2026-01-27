@@ -62,7 +62,7 @@ def main():
     args = parser.parse_args()
 
     today = date.today().isoformat()
-    workdir_name = f"build({args.project_code}).{args.object_name}.{today}"
+    workdir_name = f"{args.project_code}.{args.object_name}.{today}"
     workdir_path = Path(workdir_name)
 
     # Create working directory
@@ -139,16 +139,13 @@ def main():
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")
     
-    copy_tree(template_src, template_dst)
+    # Copy ASC template contents directly into working directory
+    copy_tree(template_src, workdir_path)
 
     # Move extracted contents to the working directory
     for item in extracted_dir.iterdir():
         src_item = item
         dst_item = workdir_path / item.name
-        
-        # Skip if it's the ASC directory (already copied)
-        if item.name == args.asc:
-            continue
         
         # Move the item
         if dst_item.exists():

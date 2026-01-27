@@ -41,7 +41,7 @@ def main():
     workdir_path.mkdir(parents=True, exist_ok=True)
 
     # Download the tar file
-    tar_name = f"build({args.url})"
+    tar_name = Path(args.url).name
     tar_path = workdir_name / tar_name
 
     print(f"Downloading {args.url}")
@@ -61,8 +61,9 @@ def main():
     extracted_dir = extracted_dirs[0]
 
     # Copy asc directory
-    template_src = Path.cwd() / args.asc
-    template_dst = workdir_name / args.asc
+    template_name = args.asc
+    template_src = Path.cwd() / template_name
+    template_dst = workdir_name / template_name
 
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")

@@ -130,6 +130,11 @@ def main():
         print("Error: Expected exactly one extracted directory.")
         
     extracted_dir = extracted_dirs[0]
+    
+    # Rename extracted directory to working directory name with .ms suffix
+    renamed_dir = workdir_path / f"{workdir_name}.ms"
+    extracted_dir.rename(renamed_dir)
+    extracted_dir = renamed_dir
 
     # Copy asc directory
     template = args.asc

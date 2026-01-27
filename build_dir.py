@@ -112,7 +112,10 @@ def main():
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")
 
-    shutil.copytree(template_src, template_dst, dirs_exist_ok=True)
+    # Handle copytree for older Python versions (< 3.8)
+    if template_dst.exists():
+        shutil.rmtree(str(template_dst))
+    shutil.copytree(str(template_src), str(template_dst))
 
     # Move extracted directory to the working directory
     final_dir = workdir_path

@@ -49,13 +49,13 @@ def main():
     print("\nDownload complete.")
     
     # Extract the tar file
-    with tarfile.open(tar_path, "r:*") as tar:
+    with tarfile.open(str(tar_path), "r:*") as tar:
         tar.extractall(path=workdir_path)
 
     # Find extracted directory
-    extracted_dirs = [p for p in workdir_name.iterdir() if p.is_dir() and p.name != args.template]
+    extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != args.template]
 
-    if len(extracted_dir) != 1:
+    if len(extracted_dirs) != 1:
         print("Error: Expected exactly one extracted directory.")
         
     extracted_dir = extracted_dirs[0]
@@ -71,8 +71,8 @@ def main():
     shutil.copytree(template_src, template_dst, dirs_exist_ok=True)
 
     # Move extracted directory to the working directory
-    final_dir = Path(workdir_name)
-    shutil.move(extracted_dir, final_dir)
+    final_dir = workdir_path
+    shutil.move(str(extracted_dir), str(final_dir))
 
     print(f'Final working directory created at: {final_dir.resolve()}')
     print("Process completed successfully.")

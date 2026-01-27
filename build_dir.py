@@ -138,27 +138,31 @@ def main():
 
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")
-
-    # Copy ASC directory into working directory
-    # Use ignore_errors to handle any permission issues
-#    def copy_tree(src, dst):
-#        if not dst.exists():
-#            dst.mkdir(parents=True)
-#        for item in Path(src).iterdir():
-#            src_item = Path(src) / item.name
-#            dst_item = dst / item.name
-#            if src_item.is_dir():
-#                shutil.copytree(str(src_item), str(dst_item), dirs_exist_ok=False, ignore_dangling_symlinks=True)
-#            else:
-#                shutil.copy2(str(src_item), str(dst_item))
     
     copy_tree(template_src, template_dst)
 
-    # Move extracted directory to the working directory
-    final_dir = workdir_path
-    shutil.move(str(extracted_dir), str(final_dir))
+    # Move extracted contents to the working directory
+    for item in extracted_dir.iterdir():
+        src_item = item
+        dst_item = workdir_path / item.name
+        
+        # Skip if it's the ASC directory (already copied)
+        if item.name == args.asc:
+            continue
+        
+        # Move the item
+        if dst_item.exists():
+            if dst_item.is_dir():
+                shutil.rmtree(str(dst_item))
+            else:
+                dst_item.unlink()
+        
+        shutil.move(str(src_item), str(dst_item))
+    
+    # Remove the now-empty extracted directory
+    shutil.rmtree(str(extracted_dir))
 
-    print(f'Final working directory created at: {final_dir.resolve()}')
+    print(f'Final working directory created at: {workdir_path.resolve()}')
     print("Process completed successfully.")
 
 if __name__ == "__main__":

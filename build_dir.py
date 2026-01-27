@@ -61,7 +61,7 @@ def main():
     extracted_dir = extracted_dirs[0]
 
     # Copy asc directory
-    template_src = ASC / args.asc
+    template_src = Path.cwd() / args.asc
     template_dst = workdir_name / args.asc
 
     if not template_src.exists():

@@ -22,6 +22,33 @@ def download_progress(blocks, block_size, total_size):
         flush=True
     )
 
+# Use ignore_errors to handle any permission issues
+def copy_tree(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    
+    # Skip if source and destination are the same
+    if src.resolve() == dst.resolve():
+        print(f"Skipping copy: source and destination are the same ({src})")
+        return
+    
+    if not dst.exists():
+        dst.mkdir(parents=True)
+    for item in src.iterdir():
+        src_item = src / item.name
+        dst_item = dst / item.name
+        
+        # Skip if source and destination are the same
+        if src_item.resolve() == dst_item.resolve():
+            continue
+        
+        if src_item.is_dir():
+            if dst_item.exists():
+                shutil.rmtree(str(dst_item))
+            shutil.copytree(str(src_item), str(dst_item), ignore_dangling_symlinks=True)
+        else:
+            shutil.copy2(str(src_item), str(dst_item))
+
 def main():
     parser = argparse.ArgumentParser(
         description="Download a tar file, extract it, and move a specified file to a new location, and create a working directory."
@@ -114,16 +141,16 @@ def main():
 
     # Copy ASC directory into working directory
     # Use ignore_errors to handle any permission issues
-    def copy_tree(src, dst):
-        if not dst.exists():
-            dst.mkdir(parents=True)
-        for item in Path(src).iterdir():
-            src_item = Path(src) / item.name
-            dst_item = dst / item.name
-            if src_item.is_dir():
-                shutil.copytree(str(src_item), str(dst_item), dirs_exist_ok=False, ignore_dangling_symlinks=True)
-            else:
-                shutil.copy2(str(src_item), str(dst_item))
+#    def copy_tree(src, dst):
+#        if not dst.exists():
+#            dst.mkdir(parents=True)
+#        for item in Path(src).iterdir():
+#            src_item = Path(src) / item.name
+#            dst_item = dst / item.name
+#            if src_item.is_dir():
+#                shutil.copytree(str(src_item), str(dst_item), dirs_exist_ok=False, ignore_dangling_symlinks=True)
+#            else:
+#                shutil.copy2(str(src_item), str(dst_item))
     
     copy_tree(template_src, template_dst)
 

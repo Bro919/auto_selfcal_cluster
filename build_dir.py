@@ -45,8 +45,12 @@ def main():
     tar_path = workdir_path / tar_name
 
     print(f"Downloading {args.url}")
-    urllib.request.urlretrieve(args.url, tar_path, reporthook=download_progress)
+    urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
     print("\nDownload complete.")
+    
+    # Verify the tar file exists
+    if not tar_path.exists():
+        sys.exit(f"Error: Tar file was not downloaded successfully at {tar_path}")
     
     # Extract the tar file
     with tarfile.open(str(tar_path), "r:*") as tar:

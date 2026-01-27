@@ -5,6 +5,7 @@ import tarfile
 import sys
 import urllib.request
 from datetime import date
+import re
 
 def download_progress(blocks, block_size, total_size):
     if total_size <= 0:
@@ -54,9 +55,31 @@ def main():
         # Download the tar file
         tar_name = Path(args.url).name
         tar_path = workdir_path / tar_name
-        print(f"Downloading {args.url}")
-        urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
-        print("\nDownload complete.")
+        
+        # If URL ends with /, it's a directory - need to find tar file inside
+        if args.url.endswith('/'):
+            print(f"Fetching directory listing from {args.url}")
+            try:
+                with urllib.request.urlopen(args.url) as response:
+                    html = response.read().decode('utf-8')
+                    # Extract tar file links from HTML
+                    tar_links = re.findall(r'href=["\']([^"\']*\.tar[^"\']*)["\']', html)
+                    if tar_links:
+                        tar_file = tar_links[0]
+                        full_url = args.url.rstrip('/') + '/' + tar_file
+                        print(f"Found tar file: {tar_file}")
+                        print(f"Downloading {full_url}")
+                        tar_path = workdir_path / tar_file
+                        urllib.request.urlretrieve(full_url, str(tar_path), reporthook=download_progress)
+                        print("\nDownload complete.")
+                    else:
+                        sys.exit(f"Error: No tar files found in directory listing at {args.url}")
+            except Exception as e:
+                sys.exit(f"Error: Could not fetch directory listing: {e}")
+        else:
+            print(f"Downloading {args.url}")
+            urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
+            print("\nDownload complete.")
     
     # Verify the tar file exists and is valid
     if not tar_path.exists():

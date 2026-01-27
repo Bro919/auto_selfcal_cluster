@@ -42,7 +42,7 @@ def main():
 
     # Download the tar file
     tar_name = Path(args.url).name
-    tar_path = workdir_name / tar_name
+    tar_path = workdir_path / tar_name
 
     print(f"Downloading {args.url}")
     urllib.request.urlretrieve(args.url, tar_path, reporthook=download_progress)
@@ -61,9 +61,9 @@ def main():
     extracted_dir = extracted_dirs[0]
 
     # Copy asc directory
-    template_name = args.asc
-    template_src = Path.cwd() / template_name
-    template_dst = workdir_name / template_name
+    template = args.asc
+    template_src = Path.cwd() / template
+    template_dst = workdir_path / template
 
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")

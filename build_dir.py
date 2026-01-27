@@ -112,10 +112,20 @@ def main():
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")
 
-    # Handle copytree for older Python versions (< 3.8)
-    if template_dst.exists():
-        shutil.rmtree(str(template_dst))
-    shutil.copytree(str(template_src), str(template_dst))
+    # Copy ASC directory into working directory
+    # Use ignore_errors to handle any permission issues
+    def copy_tree(src, dst):
+        if not dst.exists():
+            dst.mkdir(parents=True)
+        for item in Path(src).iterdir():
+            src_item = Path(src) / item.name
+            dst_item = dst / item.name
+            if src_item.is_dir():
+                shutil.copytree(str(src_item), str(dst_item), dirs_exist_ok=False, ignore_dangling_symlinks=True)
+            else:
+                shutil.copy2(str(src_item), str(dst_item))
+    
+    copy_tree(template_src, template_dst)
 
     # Move extracted directory to the working directory
     final_dir = workdir_path

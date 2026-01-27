@@ -40,13 +40,23 @@ def main():
     # Create working directory
     workdir_path.mkdir(parents=True, exist_ok=True)
 
-    # Download the tar file
-    tar_name = Path(args.url).name
-    tar_path = workdir_path / tar_name
-
-    print(f"Downloading {args.url}")
-    urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
-    print("\nDownload complete.")
+    # Check for existing tar files in current directory
+    cwd = Path.cwd()
+    tar_files = list(cwd.glob("*.tar*"))
+    
+    if tar_files:
+        # Use the first tar file found
+        tar_path = workdir_path / tar_files[0].name
+        print(f"Found tar file: {tar_files[0].name}")
+        shutil.copy(str(tar_files[0]), str(tar_path))
+        print("Copied to working directory.")
+    else:
+        # Download the tar file
+        tar_name = Path(args.url).name
+        tar_path = workdir_path / tar_name
+        print(f"Downloading {args.url}")
+        urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
+        print("\nDownload complete.")
     
     # Verify the tar file exists and is valid
     if not tar_path.exists():

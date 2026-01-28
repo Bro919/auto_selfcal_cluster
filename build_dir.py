@@ -189,10 +189,17 @@ def main():
         base_url = args.url.rstrip('/')
         dir_url = f"{base_url}/{args.project_code}"
         
-        def get_all_files_from_directory(url, all_files=None):
+        def get_all_files_from_directory(url, all_files=None, visited=None):
             """Recursively collect all file URLs from a directory listing"""
             if all_files is None:
                 all_files = []
+            if visited is None:
+                visited = set()
+            
+            # Avoid infinite loops by tracking visited URLs
+            if url in visited:
+                return all_files
+            visited.add(url)
             
             try:
                 print(f"Scanning directory: {url}")
@@ -201,16 +208,34 @@ def main():
                     # Extract file/directory links from HTML - look for href attributes
                     links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
                     
-                    # Remove duplicates and filter
+                    # Remove duplicates
                     links = list(set(links))
-                    links = [link for link in links if link not in ['../', './', '..', '.', '']]
                     
+                    # Filter out problematic links:
+                    # - Parent directory (.., ../)
+                    # - Current directory (., ./)
+                    # - Absolute paths starting with / (which are server-root paths, not relative)
+                    # - Empty strings
+                    # - Query parameters or sorting links
+                    valid_links = []
                     for link in links:
+                        # Skip if it's a parent/current dir reference
+                        if link in ['../', './', '..', '.', '']:
+                            continue
+                        # Skip if it starts with / (absolute server path)
+                        if link.startswith('/'):
+                            continue
+                        # Skip if it contains ?C= (Apache sorting parameter)
+                        if '?C=' in link:
+                            continue
+                        valid_links.append(link)
+                    
+                    for link in valid_links:
                         item_url = url.rstrip('/') + '/' + link.lstrip('/')
                         
                         # If it's a directory (ends with /), recurse into it
                         if link.endswith('/'):
-                            get_all_files_from_directory(item_url, all_files)
+                            get_all_files_from_directory(item_url, all_files, visited)
                         else:
                             # It's a file - add to our list
                             all_files.append((link, item_url))

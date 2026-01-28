@@ -189,95 +189,105 @@ def main():
         base_url = args.url.rstrip('/')
         dir_url = f"{base_url}/{args.project_code}"
         
-        def download_directory_recursive(url, local_path):
-            """Recursively download all files from a directory URL"""
+        def get_all_files_from_directory(url, all_files=None):
+            """Recursively collect all file URLs from a directory listing"""
+            if all_files is None:
+                all_files = []
+            
             try:
-                print(f"Fetching directory listing from {url}")
+                print(f"Scanning directory: {url}")
                 with urllib.request.urlopen(url) as response:
                     html = response.read().decode('utf-8')
                     # Extract file/directory links from HTML - look for href attributes
-                    # Filter to only get valid filenames (not query parameters or parent dir links)
                     links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
                     
-                    # Remove duplicates and filter out parent directory
+                    # Remove duplicates and filter
                     links = list(set(links))
                     links = [link for link in links if link not in ['../', './', '..', '.', '']]
                     
-                    if not links:
-                        return False
-                    
                     for link in links:
                         item_url = url.rstrip('/') + '/' + link.lstrip('/')
-                        item_path = local_path / link.rstrip('/')
                         
-                        # Try as directory first
+                        # If it's a directory (ends with /), recurse into it
                         if link.endswith('/'):
-                            item_path.mkdir(parents=True, exist_ok=True)
-                            print(f"Downloading directory: {link}")
-                            download_directory_recursive(item_url, item_path)
+                            get_all_files_from_directory(item_url, all_files)
                         else:
-                            # It's a file
-                            item_path.parent.mkdir(parents=True, exist_ok=True)
-                            print(f"Downloading file: {link}")
-                            try:
-                                urllib.request.urlretrieve(item_url, str(item_path))
-                            except Exception as e:
-                                print(f"Warning: Could not download {link}: {e}")
-                    
-                    return True
+                            # It's a file - add to our list
+                            all_files.append((link, item_url))
+                
+                return all_files
             except Exception as e:
-                print(f"Warning: Error fetching directory {url}: {e}")
-                return False
+                print(f"Warning: Error scanning directory {url}: {e}")
+                return all_files
         
-        # Create a temporary directory to download contents
+        # Collect all files from the remote directory structure
+        print(f"Scanning remote directory structure at {dir_url}")
+        all_files = get_all_files_from_directory(dir_url)
+        
+        if not all_files:
+            sys.exit(f"Error: No files found in directory {dir_url}")
+        
+        print(f"Found {len(all_files)} files to download")
+        
+        # Download all files to the temp directory, preserving relative paths
         temp_dir = workdir_path / "temp_download"
-        temp_dir.mkdir(parents=True, exist_ok=True)
         
-        # Download the entire project directory
-        if download_directory_recursive(dir_url, temp_dir):
-            print("Directory download complete.")
+        for file_name, file_url in all_files:
+            # Extract the relative path from the URL
+            # Remove the base URL to get the relative path
+            relative_path = file_url.replace(dir_url.rstrip('/') + '/', '')
+            file_path = temp_dir / relative_path
             
-            # Now search for .ms directory in downloaded content using the same logic as tar extraction
-            asc_name = Path(args.asc).name
-            extracted_dirs = [p for p in temp_dir.iterdir() if p.is_dir() and p.name != asc_name]
+            # Create parent directories if needed
+            file_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Search for a directory with '.ms' suffix inside the downloaded tree
-            ms_dirs = []
-            for d in extracted_dirs:
-                if d.name.endswith('.ms'):
-                    ms_dirs.append(d)
-                else:
-                    ms_dirs.extend([p for p in d.rglob('*') if p.is_dir() and p.name.endswith('.ms')])
-            
-            if ms_dirs:
-                if len(ms_dirs) > 1:
-                    print("Warning: Multiple .ms directories found; using the first one.")
-                ms_dir = ms_dirs[0]
-                
-                # Move the found .ms directory into the working directory and rename it
-                target_ms = workdir_path / f"{workdir_name}.ms"
-                if target_ms.exists():
-                    if target_ms.is_dir():
-                        shutil.rmtree(str(target_ms))
-                    else:
-                        target_ms.unlink()
-                
-                try:
-                    shutil.move(str(ms_dir), str(target_ms))
-                except Exception as e:
-                    sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
-            else:
-                # No .ms directory found - treat the downloaded content as the data directory
-                print("No .ms directory found in downloaded content. Using downloaded structure as-is.")
-            
-            # Clean up temp directory
+            print(f"Downloading: {relative_path}")
             try:
-                if temp_dir.exists():
-                    shutil.rmtree(str(temp_dir))
+                urllib.request.urlretrieve(file_url, str(file_path))
             except Exception as e:
-                print(f"Warning: Could not remove temporary download directory: {e}")
+                print(f"Warning: Could not download {relative_path}: {e}")
+        
+        print("Directory download complete.")
+        
+        # Now search for .ms directory in downloaded content using the same logic as tar extraction
+        asc_name = Path(args.asc).name
+        extracted_dirs = [p for p in temp_dir.iterdir() if p.is_dir() and p.name != asc_name]
+        
+        # Search for a directory with '.ms' suffix inside the downloaded tree
+        ms_dirs = []
+        for d in extracted_dirs:
+            if d.name.endswith('.ms'):
+                ms_dirs.append(d)
+            else:
+                ms_dirs.extend([p for p in d.rglob('*') if p.is_dir() and p.name.endswith('.ms')])
+        
+        if ms_dirs:
+            if len(ms_dirs) > 1:
+                print("Warning: Multiple .ms directories found; using the first one.")
+            ms_dir = ms_dirs[0]
+            
+            # Move the found .ms directory into the working directory and rename it
+            target_ms = workdir_path / f"{workdir_name}.ms"
+            if target_ms.exists():
+                if target_ms.is_dir():
+                    shutil.rmtree(str(target_ms))
+                else:
+                    target_ms.unlink()
+            
+            try:
+                shutil.move(str(ms_dir), str(target_ms))
+            except Exception as e:
+                sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
         else:
-            sys.exit(f"Error: Could not download directory from {dir_url}")
+            # No .ms directory found - treat the downloaded content as the data directory
+            print("No .ms directory found in downloaded content. Using downloaded structure as-is.")
+        
+        # Clean up temp directory
+        try:
+            if temp_dir.exists():
+                shutil.rmtree(str(temp_dir))
+        except Exception as e:
+            print(f"Warning: Could not remove temporary download directory: {e}")
 
     # Copy ASC template contents directly into working directory
     template = Path(args.asc)

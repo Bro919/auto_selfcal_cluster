@@ -74,6 +74,8 @@ def main():
     # Check for existing tar files in current directory
     cwd = Path.cwd()
     tar_files = list(cwd.glob("*.tar*"))
+    tar_path = None
+    extracted = False
     
     if tar_files:
         # Use the first tar file found
@@ -81,12 +83,28 @@ def main():
         print(f"Found tar file: {tar_files[0].name}")
         shutil.copy(str(tar_files[0]), str(tar_path))
         print("Copied to working directory.")
+        
+        # Verify the tar file exists and is valid
+        if not tar_path.exists():
+            sys.exit(f"Error: Tar file was not downloaded successfully at {tar_path}")
+        
+        # Check if file is a valid tar archive
+        if not tarfile.is_tarfile(str(tar_path)):
+            sys.exit(f"Error: Downloaded file at {tar_path} is not a valid tar archive. The download may have been incomplete or corrupted.")
+        
+        # Extract the tar file
+        try:
+            with tarfile.open(str(tar_path), "r:*") as tar:
+                tar.extractall(path=workdir_path)
+            extracted = True
+        except tarfile.ReadError as e:
+            sys.exit(f"Error: Failed to extract tar file: {e}")
     else:
-        # Download the tar file
+        # No tar file found locally, try downloading
         tar_name = Path(args.url).name
         tar_path = workdir_path / tar_name
         
-        # If URL ends with /, it's a directory - need to find tar file inside
+        # If URL ends with /, it's a directory - need to find tar file or .ms directory inside
         if args.url.endswith('/'):
             print(f"Fetching directory listing from {args.url}")
             try:
@@ -94,7 +112,10 @@ def main():
                     html = response.read().decode('utf-8')
                     # Extract tar file links from HTML
                     tar_links = re.findall(r'href=["\']([^"\']*\.tar[^"\']*)["\']', html)
+                    ms_links = re.findall(r'href=["\']([^"\']*\.ms/?)["\']', html)
+                    
                     if tar_links:
+                        # Prefer tar file if available
                         tar_file = tar_links[0]
                         full_url = args.url.rstrip('/') + '/' + tar_file
                         print(f"Found tar file: {tar_file}")
@@ -102,61 +123,98 @@ def main():
                         tar_path = workdir_path / tar_file
                         urllib.request.urlretrieve(full_url, str(tar_path), reporthook=download_progress)
                         print("\nDownload complete.")
+                        
+                        # Verify and extract the tar file
+                        if not tarfile.is_tarfile(str(tar_path)):
+                            sys.exit(f"Error: Downloaded file at {tar_path} is not a valid tar archive.")
+                        
+                        try:
+                            with tarfile.open(str(tar_path), "r:*") as tar:
+                                tar.extractall(path=workdir_path)
+                            extracted = True
+                        except tarfile.ReadError as e:
+                            sys.exit(f"Error: Failed to extract tar file: {e}")
+                    elif ms_links:
+                        # No tar file, but found .ms directory - download it directly
+                        ms_dir = ms_links[0].rstrip('/')
+                        full_url = args.url.rstrip('/') + '/' + ms_dir
+                        print(f"Found .ms directory: {ms_dir}")
+                        print(f"Downloading {full_url} (this may take a while for large directories)")
+                        # We'll handle this in the .ms directory search below
+                        extracted = False
                     else:
-                        sys.exit(f"Error: No tar files found in directory listing at {args.url}")
+                        sys.exit(f"Error: No tar or .ms directories found in directory listing at {args.url}")
             except Exception as e:
                 sys.exit(f"Error: Could not fetch directory listing: {e}")
         else:
             print(f"Downloading {args.url}")
             urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
             print("\nDownload complete.")
-    
-    # Verify the tar file exists and is valid
-    if not tar_path.exists():
-        sys.exit(f"Error: Tar file was not downloaded successfully at {tar_path}")
-    
-    # Check if file is a valid tar archive
-    if not tarfile.is_tarfile(str(tar_path)):
-        sys.exit(f"Error: Downloaded file at {tar_path} is not a valid tar archive. The download may have been incomplete or corrupted.")
-    
-    # Extract the tar file
-    try:
-        with tarfile.open(str(tar_path), "r:*") as tar:
-            tar.extractall(path=workdir_path)
-    except tarfile.ReadError as e:
-        sys.exit(f"Error: Failed to extract tar file: {e}")
+            
+            # Check if it's a tar file and extract if so
+            if tarfile.is_tarfile(str(tar_path)):
+                try:
+                    with tarfile.open(str(tar_path), "r:*") as tar:
+                        tar.extractall(path=workdir_path)
+                    extracted = True
+                except tarfile.ReadError as e:
+                    sys.exit(f"Error: Failed to extract tar file: {e}")
+            else:
+                # Not a tar file, assume it's a directory structure
+                extracted = False
 
-    # Find extracted directory (top-level)
-    # Compare directory names when excluding the ASC template from extracted dirs
-    asc_name = Path(args.asc).name
-    extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != asc_name]
-
-    if not extracted_dirs:
-        sys.exit("Error: No extracted directories found.")
-    if len(extracted_dirs) > 1:
-        print("Warning: Multiple extracted directories found; using the first one.")
-    top_dir = extracted_dirs[0]
-
-    # Search for a directory with '.ms' suffix inside the extracted tree (including top_dir itself)
-    ms_dirs = []
-    if top_dir.name.endswith('.ms'):
-        ms_dirs.append(top_dir)
-    else:
-        ms_dirs = [p for p in top_dir.rglob('*') if p.is_dir() and p.name.endswith('.ms')]
-
+    # Find .ms directory (either from extracted tar or downloaded directly)
     ms_dir = None
-    if not ms_dirs:
-        # Fallback: if top_dir contains exactly one subdirectory, use it
-        inner_dirs = [p for p in top_dir.iterdir() if p.is_dir()]
-        if len(inner_dirs) == 1:
-            ms_dir = inner_dirs[0]
-            print(f"No .ms dir found; using inner directory {ms_dir.name}")
+    
+    if extracted:
+        # Find extracted directory (top-level)
+        # Compare directory names when excluding the ASC template from extracted dirs
+        asc_name = Path(args.asc).name
+        extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != asc_name]
+
+        if not extracted_dirs:
+            sys.exit("Error: No extracted directories found.")
+        if len(extracted_dirs) > 1:
+            print("Warning: Multiple extracted directories found; using the first one.")
+        top_dir = extracted_dirs[0]
+
+        # Search for a directory with '.ms' suffix inside the extracted tree (including top_dir itself)
+        ms_dirs = []
+        if top_dir.name.endswith('.ms'):
+            ms_dirs.append(top_dir)
         else:
-            sys.exit(f"Error: No directory with '.ms' suffix found inside {top_dir}")
+            ms_dirs = [p for p in top_dir.rglob('*') if p.is_dir() and p.name.endswith('.ms')]
+
+        if not ms_dirs:
+            # Fallback: if top_dir contains exactly one subdirectory, use it
+            inner_dirs = [p for p in top_dir.iterdir() if p.is_dir()]
+            if len(inner_dirs) == 1:
+                ms_dir = inner_dirs[0]
+                print(f"No .ms dir found; using inner directory {ms_dir.name}")
+            else:
+                sys.exit(f"Error: No directory with '.ms' suffix found inside {top_dir}")
+        else:
+            if len(ms_dirs) > 1:
+                print("Warning: Multiple .ms directories found; using the first one.")
+            ms_dir = ms_dirs[0]
     else:
-        if len(ms_dirs) > 1:
-            print("Warning: Multiple .ms directories found; using the first one.")
-        ms_dir = ms_dirs[0]
+        # No tar file was extracted; look for .ms directory in workdir_path directly
+        # This could happen if downloading a directory structure or if the download wasn't a tar
+        ms_dirs = [p for p in workdir_path.rglob('*') if p.is_dir() and p.name.endswith('.ms')]
+        
+        if ms_dirs:
+            if len(ms_dirs) > 1:
+                print("Warning: Multiple .ms directories found; using the first one.")
+            ms_dir = ms_dirs[0]
+        else:
+            # No .ms directory found, look for any directory in workdir_path
+            all_dirs = [p for p in workdir_path.iterdir() if p.is_dir()]
+            if all_dirs:
+                if len(all_dirs) > 1:
+                    print("Warning: No .ms directory found; using the first directory.")
+                ms_dir = all_dirs[0]
+            else:
+                sys.exit(f"Error: No .ms directory or any directory found in {workdir_path}")
 
     # Move the found .ms directory into the working directory and rename it
     target_ms = workdir_path / f"{workdir_name}.ms"

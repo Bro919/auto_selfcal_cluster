@@ -59,6 +59,9 @@ def scrape_listfile(listfile, source_name):
     # FIELD ===============================================
     nfields = int(field_line.split(" ")[-1][0])
     ls = [lines[field_indx+1+i] for i in range(nfields+1)]
+    field = None
+    ra = None
+    dec = None
     for l in ls:
         if source_name in l:
             field = l.split()[0]

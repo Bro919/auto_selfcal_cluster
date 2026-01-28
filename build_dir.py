@@ -57,7 +57,10 @@ def main():
     parser.add_argument("project_code", help="Name of the project code, to name the working directory")
     parser.add_argument("object_name", help="Path to the working directory")
     parser.add_argument("url", help="URL of the tar file to download")
-    parser.add_argument("asc", help="Path to the ACS directory")
+    # `asc` is usually a fixed template directory. Make it optional with a sensible default
+    default_asc = Path(__file__).parent / "ASC"
+    parser.add_argument("--asc", dest="asc", default=str(default_asc),
+                        help=f"Path to the ACS directory (default: {default_asc})")
 
     args = parser.parse_args()
 
@@ -124,7 +127,9 @@ def main():
         sys.exit(f"Error: Failed to extract tar file: {e}")
 
     # Find extracted directory
-    extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != args.asc]
+    # Compare directory names when excluding the ASC template from extracted dirs
+    asc_name = Path(args.asc).name
+    extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != asc_name]
 
     if len(extracted_dirs) != 1:
         print("Error: Expected exactly one extracted directory.")
@@ -137,9 +142,10 @@ def main():
     extracted_dir = renamed_dir
 
     # Copy asc directory
-    template = args.asc
-    template_src = Path.cwd() / template
-    template_dst = workdir_path / template
+    template = Path(args.asc)
+    # If the provided template is relative, interpret it relative to the current working directory.
+    template_src = template if template.is_absolute() else (Path.cwd() / template)
+#    template_dst = workdir_path / template
 
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")

@@ -126,49 +126,66 @@ def main():
     except tarfile.ReadError as e:
         sys.exit(f"Error: Failed to extract tar file: {e}")
 
-    # Find extracted directory
+    # Find extracted directory (top-level)
     # Compare directory names when excluding the ASC template from extracted dirs
     asc_name = Path(args.asc).name
     extracted_dirs = [p for p in workdir_path.iterdir() if p.is_dir() and p.name != asc_name]
 
-    if len(extracted_dirs) != 1:
-        print("Error: Expected exactly one extracted directory.")
-        
-    extracted_dir = extracted_dirs[0]
-    
-    # Rename extracted directory to working directory name with .ms suffix
-    renamed_dir = workdir_path / f"{workdir_name}.ms"
-    extracted_dir.rename(renamed_dir)
-    extracted_dir = renamed_dir
+    if not extracted_dirs:
+        sys.exit("Error: No extracted directories found.")
+    if len(extracted_dirs) > 1:
+        print("Warning: Multiple extracted directories found; using the first one.")
+    top_dir = extracted_dirs[0]
 
-    # Copy asc directory
+    # Search for a directory with '.ms' suffix inside the extracted tree (including top_dir itself)
+    ms_dirs = []
+    if top_dir.name.endswith('.ms'):
+        ms_dirs.append(top_dir)
+    else:
+        ms_dirs = [p for p in top_dir.rglob('*') if p.is_dir() and p.name.endswith('.ms')]
+
+    ms_dir = None
+    if not ms_dirs:
+        # Fallback: if top_dir contains exactly one subdirectory, use it
+        inner_dirs = [p for p in top_dir.iterdir() if p.is_dir()]
+        if len(inner_dirs) == 1:
+            ms_dir = inner_dirs[0]
+            print(f"No .ms dir found; using inner directory {ms_dir.name}")
+        else:
+            sys.exit(f"Error: No directory with '.ms' suffix found inside {top_dir}")
+    else:
+        if len(ms_dirs) > 1:
+            print("Warning: Multiple .ms directories found; using the first one.")
+        ms_dir = ms_dirs[0]
+
+    # Move the found .ms directory into the working directory and rename it
+    target_ms = workdir_path / f"{workdir_name}.ms"
+    if target_ms.exists():
+        if target_ms.is_dir():
+            shutil.rmtree(str(target_ms))
+        else:
+            target_ms.unlink()
+
+    try:
+        shutil.move(str(ms_dir), str(target_ms))
+    except Exception as e:
+        sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
+
+    # Copy ASC template contents directly into working directory
     template = Path(args.asc)
     # If the provided template is relative, interpret it relative to the current working directory.
     template_src = template if template.is_absolute() else (Path.cwd() / template)
-#    template_dst = workdir_path / template
 
     if not template_src.exists():
         sys.exit(f"Error: ACS directory {template_src} does not exist.")
-    
-    # Copy ASC template contents directly into working directory
     copy_tree(template_src, workdir_path)
 
-    # Move extracted contents to the working directory
-    for item in extracted_dir.iterdir():
-        src_item = item
-        dst_item = workdir_path / item.name
-        
-        # Move the item
-        if dst_item.exists():
-            if dst_item.is_dir():
-                shutil.rmtree(str(dst_item))
-            else:
-                dst_item.unlink()
-        
-        shutil.move(str(src_item), str(dst_item))
-    
-    # Remove the now-empty extracted directory
-    shutil.rmtree(str(extracted_dir))
+    # Remove the now-empty top-level extracted directory if it still exists and is different from target
+    try:
+        if top_dir.exists() and top_dir.is_dir() and top_dir.resolve() != target_ms.resolve():
+            shutil.rmtree(str(top_dir))
+    except Exception as e:
+        print(f"Warning: could not remove {top_dir}: {e}")
 
     print(f'Final working directory created at: {workdir_path.resolve()}')
     print("Process completed successfully.")

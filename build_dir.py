@@ -38,17 +38,36 @@ def copy_tree(src, dst):
     for item in src.iterdir():
         src_item = src / item.name
         dst_item = dst / item.name
-        
+
         # Skip if source and destination are the same
         if src_item.resolve() == dst_item.resolve():
             continue
-        
-        if src_item.is_dir():
-            if dst_item.exists():
-                shutil.rmtree(str(dst_item))
-            shutil.copytree(str(src_item), str(dst_item), ignore_dangling_symlinks=True)
-        else:
-            shutil.copy2(str(src_item), str(dst_item))
+
+        # Skip version control metadata that may be unreadable or irrelevant
+        if src_item.name == '.git' or src_item.name.startswith('.git'):
+            print(f"Skipping VCS metadata directory: {src_item}")
+            continue
+
+        try:
+            if src_item.is_dir():
+                if dst_item.exists():
+                    shutil.rmtree(str(dst_item))
+                # Avoid copying .git contents and other common VCS/artifact files
+                shutil.copytree(
+                    str(src_item),
+                    str(dst_item),
+                    ignore=shutil.ignore_patterns('.git', '*.lock'),
+                    ignore_dangling_symlinks=True
+                )
+            else:
+                shutil.copy2(str(src_item), str(dst_item))
+        except PermissionError as e:
+            print(f"Warning: Permission error copying {src_item} -> {dst_item}: {e}")
+        except shutil.Error as e:
+            # shutil.copytree raises shutil.Error if some files couldn't be copied
+            print(f"Warning: Error copying {src_item} -> {dst_item}: {e}")
+        except Exception as e:
+            print(f"Warning: Unexpected error copying {src_item} -> {dst_item}: {e}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -189,57 +208,92 @@ def main():
         base_url = args.url.rstrip('/')
         dir_url = f"{base_url}/{args.project_code}"
         
-        def get_all_files_from_directory(url, all_files=None, visited=None):
-            """Recursively collect all file URLs from a directory listing"""
+        def find_first_ms_dir(url, visited=None):
+            """Recursively search for the first directory whose name ends with '.ms' and return
+            a tuple (relative_path_from_start, ms_url). Returns None if not found."""
+            if visited is None:
+                visited = set()
+            if url in visited:
+                return None
+            visited.add(url)
+
+            try:
+                print(f"Scanning for .ms directories at {url}")
+                with urllib.request.urlopen(url) as response:
+                    html = response.read().decode('utf-8')
+                    links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
+                    links = list(set(links))
+
+                    valid_links = []
+                    for link in links:
+                        if link in ['../', './', '..', '.', '']:
+                            continue
+                        if link.startswith('/'):
+                            continue
+                        if '?C=' in link:
+                            continue
+                        valid_links.append(link)
+
+                    # Check for a .ms directory at this level
+                    for link in valid_links:
+                        if link.endswith('/') and link.rstrip('/').endswith('.ms'):
+                            ms_rel = link.rstrip('/')
+                            ms_url = url.rstrip('/') + '/' + link.lstrip('/')
+                            return (ms_rel, ms_url)
+
+                    # Recurse into subdirectories
+                    for link in valid_links:
+                        if link.endswith('/'):
+                            sub_url = url.rstrip('/') + '/' + link.lstrip('/')
+                            res = find_first_ms_dir(sub_url, visited)
+                            if res:
+                                sub_rel, ms_url = res
+                                combined_rel = link.rstrip('/') + '/' + sub_rel
+                                return (combined_rel, ms_url)
+            except Exception as e:
+                print(f"Warning: Error scanning directory {url} for .ms: {e}")
+            return None
+
+        def get_all_files_from_directory(url, base_url=None, all_files=None, visited=None):
+            """Recursively collect all file URLs from a directory listing and return tuples
+            of (relative_path_from_base, full_file_url)."""
             if all_files is None:
                 all_files = []
             if visited is None:
                 visited = set()
-            
-            # Avoid infinite loops by tracking visited URLs
+            if base_url is None:
+                base_url = url.rstrip('/')
+
             if url in visited:
                 return all_files
             visited.add(url)
-            
+
             try:
                 print(f"Scanning directory: {url}")
                 with urllib.request.urlopen(url) as response:
                     html = response.read().decode('utf-8')
-                    # Extract file/directory links from HTML - look for href attributes
                     links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
-                    
-                    # Remove duplicates
                     links = list(set(links))
-                    
-                    # Filter out problematic links:
-                    # - Parent directory (.., ../)
-                    # - Current directory (., ./)
-                    # - Absolute paths starting with / (which are server-root paths, not relative)
-                    # - Empty strings
-                    # - Query parameters or sorting links
+
                     valid_links = []
                     for link in links:
-                        # Skip if it's a parent/current dir reference
                         if link in ['../', './', '..', '.', '']:
                             continue
-                        # Skip if it starts with / (absolute server path)
                         if link.startswith('/'):
                             continue
-                        # Skip if it contains ?C= (Apache sorting parameter)
                         if '?C=' in link:
                             continue
                         valid_links.append(link)
-                    
+
                     for link in valid_links:
                         item_url = url.rstrip('/') + '/' + link.lstrip('/')
-                        
-                        # If it's a directory (ends with /), recurse into it
+
                         if link.endswith('/'):
-                            get_all_files_from_directory(item_url, all_files, visited)
+                            get_all_files_from_directory(item_url, base_url, all_files, visited)
                         else:
-                            # It's a file - add to our list
-                            all_files.append((link, item_url))
-                
+                            relative_path = item_url.replace(base_url.rstrip('/') + '/', '')
+                            all_files.append((relative_path, item_url))
+
                 return all_files
             except Exception as e:
                 print(f"Warning: Error scanning directory {url}: {e}")
@@ -247,31 +301,42 @@ def main():
         
         # Collect all files from the remote directory structure
         print(f"Scanning remote directory structure at {dir_url}")
-        all_files = get_all_files_from_directory(dir_url)
-        
+        # Try to find the first .ms directory and download only its contents when present
+        ms_info = find_first_ms_dir(dir_url)
+        if ms_info:
+            ms_rel_path, ms_url = ms_info
+            print(f"Found .ms directory: {ms_rel_path}; downloading only its contents from {ms_url}")
+            all_files = get_all_files_from_directory(ms_url, base_url=ms_url)
+            ms_found = True
+        else:
+            print("No .ms directory found in remote listing; downloading entire directory tree.")
+            all_files = get_all_files_from_directory(dir_url, base_url=dir_url)
+            ms_found = False
+
         if not all_files:
             sys.exit(f"Error: No files found in directory {dir_url}")
-        
+
         print(f"Found {len(all_files)} files to download")
-        
+
         # Download all files to the temp directory, preserving relative paths
         temp_dir = workdir_path / "temp_download"
-        
-        for file_name, file_url in all_files:
-            # Extract the relative path from the URL
-            # Remove the base URL to get the relative path
-            relative_path = file_url.replace(dir_url.rstrip('/') + '/', '')
+
+        for rel_path, file_url in all_files:
+            if ms_found:
+                relative_path = Path(ms_rel_path) / Path(rel_path)
+            else:
+                relative_path = Path(rel_path)
             file_path = temp_dir / relative_path
-            
+
             # Create parent directories if needed
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             print(f"Downloading: {relative_path}")
             try:
                 urllib.request.urlretrieve(file_url, str(file_path))
             except Exception as e:
                 print(f"Warning: Could not download {relative_path}: {e}")
-        
+
         print("Directory download complete.")
         
         # Now search for .ms directory in downloaded content using the same logic as tar extraction

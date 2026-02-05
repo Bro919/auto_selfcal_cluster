@@ -4,14 +4,14 @@ from pathlib import Path
 import os
 
 # user options
-root_dir = "/lustre/aoc/observers/nm-14416/Desktop/23A-241/23A-241.ASASSN-14ae.2023-09-17"
+root_dir = "/lustre/aoc/observers/nm-15783/projectname.objectname"
 prefix_string = "23A-241.ASASSN-14ae.2023-09-17"
 final_images_only = True   # toggle False if you also want the model, residual, etc. that tclean gives 
 apply_calibrations = True  # will apply calibrations to each split measurement set
 concat_final_ms = True     # will concat all split measurement sets into one _final.ms with calibrations applied (not clear if this actually produces a good self-cal ms)
 
 # for an SED
-frequencies = [1.25, 1.5, 1.75,
+frequencies = [1.26, 1.52, 1.75,
                2.5, 3.0, 3.5,
                5.0, 6.0, 7.0,
                9.0, 10.0, 11.0]

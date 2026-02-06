@@ -190,7 +190,7 @@ def split_ms(df_store, measurement_set_target):
 
 # where things are
 ms_directory = os.path.dirname(measurement_set)
-auto_sc_files_directory = "/lustre/aoc/observers/nm-15783/auto_selfcal_cluster/ASC/auto_selcal"
+auto_sc_files_directory = "/lustre/aoc/observers/nm-15783/auto_selfcal_cluster/ASC/auto_selfcal"
 
 # create listfile and scrape for tclean parameters
 listfile = ms_directory+"listfile.txt"

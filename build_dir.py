@@ -391,5 +391,45 @@ def main():
     print(f'Final working directory created at: {workdir_path.resolve()}')
     print("Process completed successfully.")
 
+    # --- Edit prep and clean scripts in working directory ---
+    prep_script = workdir_path / "prep-ms-for-auto-selfcal.py"
+    clean_script = workdir_path / "clean_up_post_selfcal.py"
+
+    # The new measurement set name
+    ms_name = f"{workdir_name}.ms"
+    # The new root dir and prefix string
+    root_dir = str(workdir_path.resolve())
+    prefix_string = workdir_name
+
+    # Edit prep script: set measurement_set and source_name
+    if prep_script.exists():
+        with prep_script.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for i, line in enumerate(lines):
+            if line.strip().startswith("measurement_set ="):
+                lines[i] = f"measurement_set = \"{ms_name}\"\n"
+            if line.strip().startswith("source_name ="):
+                lines[i] = f"source_name = \"{args.object_name}\"\n"
+        with prep_script.open("w", encoding="utf-8") as f:
+            f.writelines(lines)
+        print(f"Updated {prep_script} with measurement_set and source_name.")
+    else:
+        print(f"Warning: {prep_script} not found.")
+
+    # Edit clean script: set root_dir and prefix_string
+    if clean_script.exists():
+        with clean_script.open("r", encoding="utf-8") as f:
+            lines = f.readlines()
+        for i, line in enumerate(lines):
+            if line.strip().startswith("root_dir ="):
+                lines[i] = f"root_dir = \"{root_dir}\"\n"
+            if line.strip().startswith("prefix_string ="):
+                lines[i] = f"prefix_string = \"{prefix_string}\"\n"
+        with clean_script.open("w", encoding="utf-8") as f:
+            f.writelines(lines)
+        print(f"Updated {clean_script} with root_dir and prefix_string.")
+    else:
+        print(f"Warning: {clean_script} not found.")
+
 if __name__ == "__main__":
     main()

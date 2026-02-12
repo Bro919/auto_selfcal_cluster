@@ -1,7 +1,21 @@
 import shutil
 import os
 from pathlib import Path
-import os
+import re
+
+def get_frequencies_from_dirs(root_dir):
+    """
+    Scans root_dir for subdirectories ending with 'GHz', extracts the numeric frequency values, and returns them as floats.
+    """
+    freq_list = []
+    for entry in os.listdir(root_dir):
+        full_path = os.path.join(root_dir, entry)
+        if os.path.isdir(full_path) and entry.endswith('GHz'):
+            # Extract the numeric part
+            match = re.match(r"([\d.]+)GHz", entry)
+            if match:
+                freq_list.append(float(match.group(1)))
+    return sorted(freq_list)
 
 # user options
 root_dir = "/lustre/aoc/observers/nm-15783/projectname.objectname"
@@ -11,10 +25,10 @@ apply_calibrations = True  # will apply calibrations to each split measurement s
 concat_final_ms = True     # will concat all split measurement sets into one _final.ms with calibrations applied (not clear if this actually produces a good self-cal ms)
 
 # for an SED
-frequencies = [1.26, 1.52, 1.75,
-               2.5, 3.0, 3.5,
-               5.0, 6.0, 7.0,
-               9.0, 10.0, 11.0]
+#frequencies = [1.26, 1.52, 1.75,
+#               2.5, 3.0, 3.5,
+#               5.0, 6.0, 7.0,
+#               9.0, 10.0, 11.0]
 bands = ["EVLA_L", "EVLA_L", "EVLA_L",
          "EVLA_S", "EVLA_S", "EVLA_S",
          "EVLA_C", "EVLA_C", "EVLA_C",
@@ -23,6 +37,9 @@ bands = ["EVLA_L", "EVLA_L", "EVLA_L",
 # for a single frequency
 # frequencies = [6.0]
 # bands = ["EVLA_C"]
+
+# frequencies will be set dynamically
+frequencies = get_frequencies_from_dirs(root_dir)
 
 final_files_directory = f"{root_dir}/final_files"
 os.makedirs(final_files_directory, exist_ok=True)

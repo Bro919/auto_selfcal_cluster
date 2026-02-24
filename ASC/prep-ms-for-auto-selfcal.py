@@ -11,7 +11,7 @@ from datetime import datetime
 # read params from config.yaml
 measurement_set = "25A-060.AT2019qiz.2025-06-01.ms"
 source_name = "AT2019qiz"
-split_band = "whole"
+split_band = "both" # options: "whole", "halves", "both"
 use_single_band = False
 single_band = "EVLA_C"
 use_single_freq = False

@@ -16,6 +16,7 @@ use_single_band = False
 single_band = "EVLA_C"
 use_single_freq = False
 single_freq = 9
+A_config = False  # Set to True to use special resources for L band
 
 # Function to scrape a listfile for information needed for tclean ================================================================
 # Inputs:
@@ -238,11 +239,20 @@ for i in range(len(split_ms_directories)):
     # write batch file
     job_base = f"auto_selfcal_{split_ms_name}"
     chdir_path = f"{split_ms_directory}"
-    
     # Define the job script filename
     job_script = f"{job_base}.sh"
-    
-    # Create the SLURM job script content
+
+    # Adjust resources for L band if A_config is True
+    row_band = None
+    if 'band' in df_store.columns:
+        row_band = df_store.loc[i, 'band']
+    if A_config and row_band == 'EVLA_L':
+        mem = '256G'
+        cores = 16
+    else:
+        mem = '128G'
+        cores = 8
+
     job_script_content = f"""#!/bin/bash
     
 #SBATCH --export=ALL                          # Export all environment variables to job
@@ -251,22 +261,19 @@ for i in range(len(split_ms_directories)):
 #SBATCH --error={job_base}.err
 #SBATCH --chdir={chdir_path}
 #SBATCH --time=7-0:0:0                        # Request 8days
-#SBATCH --mem=128G                            # Memory for the whole job
+#SBATCH --mem={mem}                           # Memory for the whole job
 #SBATCH --nodes=1                             # Request 1 node
-#SBATCH --ntasks-per-node=8                   # Request 8 cores
+#SBATCH --ntasks-per-node={cores}             # Request {cores} cores
 
 echo "about to run auto_selfcal.py"
 xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c auto_selfcal.py
- """
-    
+"""
+
     # Write the job script to a file
     job_script_path = f"{split_ms_directory}/{job_script}"
     with open(job_script_path, "w") as f:
         f.write(job_script_content)
-    
     print(f"Job script {job_script} created.")
-    
-
     batch_file_paths.append(job_script_path)
 
 with open('batch_files_list.txt', 'w') as f:

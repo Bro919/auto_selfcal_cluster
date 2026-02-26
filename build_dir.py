@@ -77,15 +77,18 @@ def main():
     parser.add_argument("project_code", help="Name of the project code, to name the working directory")
     parser.add_argument("object_name", help="Path to the working directory")
     parser.add_argument("url", help="URL of the tar file to download")
+    parser.add_argument("observation_date", help="Observation date (YYYY-MM-DD)")
     # `asc` is usually a fixed template directory. Make it optional with a sensible default
     default_asc = Path(__file__).parent / "ASC"
     parser.add_argument("--asc", dest="asc", default=str(default_asc),
                         help=f"Path to the ACS directory (default: {default_asc})")
+    parser.add_argument("--a-config", dest="a_config", action="store_true", default=False,
+                        help="Enable A configuration in prep script (default: False)")
 
     args = parser.parse_args()
 
-    today = date.today().isoformat()
-    workdir_name = f"{args.project_code}.{args.object_name}.{today}"
+    obs_date = args.observation_date
+    workdir_name = f"{args.project_code}.{args.object_name}.{obs_date}"
     workdir_path = Path(workdir_name)
 
     # Create working directory
@@ -395,13 +398,14 @@ def main():
     prep_script = workdir_path / "prep-ms-for-auto-selfcal.py"
     clean_script = workdir_path / "clean_up_post_selfcal.py"
 
+
     # The new measurement set name
     ms_name = f"{workdir_name}.ms"
     # The new root dir and prefix string
     root_dir = str(workdir_path.resolve())
     prefix_string = workdir_name
 
-    # Edit prep script: set measurement_set and source_name
+    # Edit prep script: set measurement_set, source_name, and optionally A_config
     if prep_script.exists():
         with prep_script.open("r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -410,9 +414,20 @@ def main():
                 lines[i] = f"measurement_set = \"{ms_name}\"\n"
             if line.strip().startswith("source_name ="):
                 lines[i] = f"source_name = \"{args.object_name}\"\n"
+            if line.strip().startswith("A_config ="):
+                # Remove existing A_config line if present, will add below if needed
+                lines[i] = ''
+        # Add A_config if enabled
+        if args.a_config:
+            # Insert after the last import or at the top
+            insert_idx = 0
+            for idx, line in enumerate(lines):
+                if line.startswith('import') or line.strip() == '':
+                    insert_idx = idx + 1
+            lines.insert(insert_idx, 'A_config = True  # Set to True to use special resources for L band\n')
         with prep_script.open("w", encoding="utf-8") as f:
-            f.writelines(lines)
-        print(f"Updated {prep_script} with measurement_set and source_name.")
+            f.writelines([l for l in lines if l.strip() != ''])
+        print(f"Updated {prep_script} with measurement_set, source_name, and A_config.")
     else:
         print(f"Warning: {prep_script} not found.")
 

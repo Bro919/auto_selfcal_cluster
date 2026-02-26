@@ -409,17 +409,21 @@ def main():
     if prep_script.exists():
         with prep_script.open("r", encoding="utf-8") as f:
             lines = f.readlines()
+        # Track if A_config was found
+        a_config_found = False
         for i, line in enumerate(lines):
             if line.strip().startswith("measurement_set ="):
                 lines[i] = f"measurement_set = \"{ms_name}\"\n"
             if line.strip().startswith("source_name ="):
                 lines[i] = f"source_name = \"{args.object_name}\"\n"
             if line.strip().startswith("A_config ="):
-                # Remove existing A_config line if present, will add below if needed
-                lines[i] = ''
-        # Add A_config if enabled
-        if args.a_config:
-            # Insert after the last import or at the top
+                a_config_found = True
+                if args.a_config:
+                    lines[i] = 'A_config = True  # Set to True to use special resources for L band\n'
+                else:
+                    lines[i] = ''
+        # If --a-config is set and no A_config line was found, insert after last import
+        if args.a_config and not a_config_found:
             insert_idx = 0
             for idx, line in enumerate(lines):
                 if line.startswith('import') or line.strip() == '':

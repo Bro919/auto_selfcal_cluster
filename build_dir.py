@@ -86,7 +86,7 @@ def copy_tree(src, dst):
 def main():
     parser = argparse.ArgumentParser(
         description="Download a tar file, extract it, and move a specified file to a new location, and create a working directory."
-
+    )
     obs_date = args.observation_date
     workdir_name = f"{args.project_code}.{args.object_name}.{obs_date}"
     workdir_path = Path(workdir_name)
@@ -346,10 +346,6 @@ def main():
                 shutil.move(str(ms_dir), str(target_ms))
             except Exception as e:
                 sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
-        else:
-            # No .ms directory found - treat the downloaded content as the data directory
-            print("No .ms directory found in downloaded content. Using downloaded structure as-is.")
-        
         # Clean up temp directory
         try:
             if temp_dir.exists():

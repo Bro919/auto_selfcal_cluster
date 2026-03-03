@@ -88,6 +88,14 @@ def main():
     parser = argparse.ArgumentParser(
         description="Download a tar file, extract it, and move a specified file to a new location, and create a working directory."
     )
+    # Add argument definitions (required for parse_args to work)
+    parser.add_argument("project_code", type=str, help="Project code (e.g., 23A-241)")
+    parser.add_argument("object_name", type=str, help="Object name (e.g., AT2019ehz)")
+    parser.add_argument("url", type=str, help="URL to download from")
+    parser.add_argument("observation_date", type=str, help="Observation date (e.g., 2023-07-22)")
+    parser.add_argument("--asc", type=str, default="ASC", help="ASC template directory (default: ASC)")
+    parser.add_argument("--a_config", action="store_true", help="Set A_config True for special resources")
+    args = parser.parse_args()
     obs_date = args.observation_date
     workdir_name = f"{args.project_code}.{args.object_name}.{obs_date}"
     workdir_path = Path(workdir_name)

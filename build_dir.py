@@ -23,6 +23,7 @@ import re
 import os
 
 def download_progress(blocks, block_size, total_size):
+    """Download progress bar"""
     if total_size <= 0:
         return
     downloaded = blocks * block_size

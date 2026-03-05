@@ -21,8 +21,8 @@ def get_frequencies_from_dirs(root_dir):
 root_dir = "/lustre/aoc/observers/nm-15783/projectname.objectname"
 prefix_string = "23A-241.ASASSN-14ae.2023-09-17"
 final_images_only = True   # toggle False if you also want the model, residual, etc. that tclean gives 
-apply_calibrations = True  # will apply calibrations to each split measurement set
-concat_final_ms = True     # will concat all split measurement sets into one _final.ms with calibrations applied (not clear if this actually produces a good self-cal ms)
+apply_calibrations = False  # will apply calibrations to each split measurement set
+concat_final_ms = False     # will concat all split measurement sets into one _final.ms with calibrations applied (not clear if this actually produces a good self-cal ms)
 
 # for an SED
 #frequencies = [1.26, 1.52, 1.75,

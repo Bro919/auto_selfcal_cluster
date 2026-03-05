@@ -247,7 +247,7 @@ for i in range(len(split_ms_directories)):
     if 'band' in df_store.columns:
         row_band = df_store.loc[i, 'band']
     if A_config and row_band == 'EVLA_L':
-        mem = '502G'
+        mem = '400G'
         cores = 16
     else:
         mem = '128G'

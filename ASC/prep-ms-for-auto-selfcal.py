@@ -246,12 +246,14 @@ for i in range(len(split_ms_directories)):
     row_band = None
     if 'band' in df_store.columns:
         row_band = df_store.loc[i, 'band']
-    if A_config and row_band == 'EVLA_L':
-        mem = '400G'
-        cores = 16
+    if A_config and row_band in ('EVLA_L', 'EVLA_S'):
+        mem = '200G'
+        cores = 6
+        tim = '14-0:0:0'  # Request 14 days for L/S band in A configuration
     else:
         mem = '128G'
         cores = 8
+        tim = '7-0:0:0'  # Request 7 days for other bands/configurations
 
     job_script_content = f"""#!/bin/bash
     
@@ -260,7 +262,7 @@ for i in range(len(split_ms_directories)):
 #SBATCH --output={job_base}.out
 #SBATCH --error={job_base}.err
 #SBATCH --chdir={chdir_path}
-#SBATCH --time=7-0:0:0                        # Request 8days
+#SBATCH --time={tim}                      # Request {tim}
 #SBATCH --mem={mem}                           # Memory for the whole job
 #SBATCH --nodes=1                             # Request 1 node
 #SBATCH --ntasks-per-node={cores}             # Request {cores} cores

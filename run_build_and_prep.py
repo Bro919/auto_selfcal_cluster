@@ -25,9 +25,21 @@ def parse_args():
     parser.add_argument("--single_freq", type=int, default=9, help="Single frequency to use when use_single_freq=True")
     parser.add_argument("--auto_sc_dir", default=None, help="Optional path to auto_selfcal repo directory for prep script")
 
-    parser.add_argument("--run-casa", action="store_true", help="Launch interactive CASA after building the workdir")
-    parser.add_argument("--casa-executable", default="casa", help="CASA executable to use when launching interactive CASA")
-    parser.add_argument("--dry-run", action="store_true", help="Show the build command and patching actions without executing them")
+    parser.add_argument(
+        "--run-casa",
+        action="store_true",
+        help="Launch interactive CASA after building the workdir and execfile the prep script",
+    )
+    parser.add_argument(
+        "--casa-executable",
+        default="casa",
+        help="CASA executable to use when launching interactive CASA",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the build command and patching actions without executing them",
+    )
     return parser.parse_args()
 
 
@@ -110,6 +122,38 @@ def patch_prep_script(
     prep_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
 
 
+def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str) -> None:
+    try:
+        import pexpect
+        from pexpect import popen_spawn
+    except ImportError as exc:
+        raise RuntimeError(
+            "pexpect is required to launch CASA automatically. Install it with 'pip install pexpect'"
+        ) from exc
+
+    command = [casa_executable]
+    print(f"Spawning CASA executable: {casa_executable}")
+    child = popen_spawn.PopenSpawn(
+        command,
+        cwd=workdir,
+        encoding="utf-8",
+        timeout=30,
+        logfile=sys.stdout,
+    )
+
+    prompt_patterns = [r"CASA <\d+>", r">>> ", r"^> ", r"^[^\n]*\$ "]
+    try:
+        child.expect(prompt_patterns, timeout=60)
+    except pexpect.exceptions.TIMEOUT:
+        raise RuntimeError(
+            "Could not detect CASA prompt after launch. Output:\n" + child.before
+        )
+
+    prep_command = f"execfile('{prep_script_path}')"
+    print(f"Executing prep script inside CASA: {prep_command}")
+    child.sendline(prep_command)
+    child.interact()
+
 def main():
     args = parse_args()
     script_dir = Path(__file__).resolve().parent
@@ -159,13 +203,14 @@ def main():
 
     print("Prep script patched successfully.")
     print(f"Workdir ready at: {workdir.resolve()}")
-    print("Next step:")
-    print(f"  cd {workdir}")
-    print("  execfile('prep-ms-for-auto-selfcal.py')")
 
     if args.run_casa:
-        print("Launching interactive CASA in the workdir...")
-        subprocess.run([args.casa_executable], cwd=workdir)
+        print("Launching interactive CASA in the workdir and executing the prep script...")
+        launch_casa_and_exec_prep(
+            args.casa_executable,
+            workdir,
+            prep_script_path.name,
+        )
     else:
         print("To launch CASA manually, run:")
         print(f"  cd {workdir}")

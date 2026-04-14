@@ -125,21 +125,31 @@ def patch_prep_script(
 def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str) -> None:
     try:
         import pexpect
-        from pexpect import popen_spawn
+        import os
     except ImportError as exc:
         raise RuntimeError(
             "pexpect is required to launch CASA automatically. Install it with 'pip install pexpect'"
         ) from exc
 
-    command = [casa_executable]
+    command = casa_executable
     print(f"Spawning CASA executable: {casa_executable}")
-    child = popen_spawn.PopenSpawn(
-        command,
-        cwd=workdir,
-        encoding="utf-8",
-        timeout=30,
-        logfile=sys.stdout,
-    )
+    if os.name == 'nt':
+        from pexpect import popen_spawn
+        child = popen_spawn.PopenSpawn(
+            [command],
+            cwd=workdir,
+            encoding="utf-8",
+            timeout=30,
+            logfile=sys.stdout,
+        )
+    else:
+        child = pexpect.spawn(
+            command,
+            cwd=str(workdir),
+            encoding="utf-8",
+            timeout=30,
+            logfile=sys.stdout,
+        )
 
     prompt_patterns = [r"CASA <\d+>", r">>> ", r"^> ", r"^[^\n]*\$ "]
     try:

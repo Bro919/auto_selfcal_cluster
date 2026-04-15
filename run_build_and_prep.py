@@ -1,4 +1,5 @@
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -10,10 +11,11 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Build the auto_selfcal workdir, patch the prep script, and optionally launch CASA interactively."
     )
-    parser.add_argument("project_code", help="Project code, e.g. 23A-241")
-    parser.add_argument("object_name", help="Object name, e.g. AT2019ehz")
-    parser.add_argument("url", help="URL to download from")
-    parser.add_argument("observation_date", help="Observation date, e.g. 2023-07-22")
+    parser.add_argument("project_code", nargs='?', help="Project code, e.g. 23A-241")
+    parser.add_argument("object_name", nargs='?', help="Object name, e.g. AT2019ehz")
+    parser.add_argument("url", nargs='?', help="URL to download from")
+    parser.add_argument("observation_date", nargs='?', help="Observation date, e.g. 2023-07-22")
+    parser.add_argument("--ms-path", help="Path to the measurement set to scrape project/object/date metadata from")
     parser.add_argument("--asc", default="ASC", help="ASC template directory or path (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Enable A_config in the prep script")
 
@@ -50,6 +52,38 @@ def parse_args():
 
 def compute_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
     return Path(f"{project_code}.{object_name}.{observation_date}")
+
+
+def find_ms_directory(root_dir: Path) -> Path:
+    candidates = [p for p in root_dir.iterdir() if p.is_dir() and p.name.endswith('.ms')]
+    if candidates:
+        return candidates[0]
+    candidates = [p for p in root_dir.rglob('*') if p.is_dir() and p.name.endswith('.ms')]
+    return candidates[0] if candidates else None
+
+
+def rename_workdir_and_measurement_set(
+    original_workdir: Path,
+    project_code: str,
+    object_name: str,
+    observation_date: str,
+    old_ms_path: Path,
+) -> tuple[Path, Path]:
+    measurement_set_name = f"{project_code}.{object_name}.{observation_date}.ms"
+    new_workdir = compute_workdir(project_code, object_name, observation_date)
+    old_ms_name = old_ms_path.name
+    if new_workdir != original_workdir:
+        if new_workdir.exists():
+            raise FileExistsError(f"Destination workdir already exists: {new_workdir}")
+        original_workdir.rename(new_workdir)
+        old_ms_path = new_workdir / old_ms_name
+    if old_ms_path.name != measurement_set_name:
+        new_ms_path = new_workdir / measurement_set_name
+        if new_ms_path.exists():
+            raise FileExistsError(f"Target measurement set already exists: {new_ms_path}")
+        old_ms_path.rename(new_ms_path)
+        old_ms_path = new_ms_path
+    return new_workdir, old_ms_path
 
 
 def patch_prep_script(
@@ -217,18 +251,22 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
 
 def main():
     args = parse_args()
+    if not args.project_code or not args.url:
+        sys.exit("Usage error: project_code and url must be provided.")
+
+    build_object = args.object_name or "unknown"
+    build_date = args.observation_date or "unknown"
     script_dir = Path(__file__).resolve().parent
-    workdir = compute_workdir(args.project_code, args.object_name, args.observation_date)
-    source_name = args.source_name or args.object_name
-    measurement_set_name = f"{args.project_code}.{args.object_name}.{args.observation_date}.ms"
+    workdir = compute_workdir(args.project_code, build_object, build_date)
+    source_name = args.source_name or build_object
 
     build_cmd = [
         sys.executable,
         str(script_dir / "build_dir.py"),
         args.project_code,
-        args.object_name,
+        build_object,
         args.url,
-        args.observation_date,
+        build_date,
         "--asc",
         args.asc,
     ]
@@ -244,6 +282,45 @@ def main():
 
     subprocess.run(build_cmd, cwd=script_dir, check=True)
 
+    ms_path = find_ms_directory(workdir)
+    if ms_path is None:
+        sys.exit(f"Error: No .ms directory found in workdir {workdir}")
+
+    if not args.object_name or not args.observation_date:
+        ms_command = [
+            sys.executable,
+            str(script_dir / "run-rename-ms.py"),
+            str(ms_path),
+            "--project-code",
+            args.project_code,
+            "--output-format",
+            "json",
+        ]
+        result = subprocess.run(ms_command, capture_output=True, text=True)
+        if result.returncode != 0:
+            sys.exit(f"Error extracting metadata from MS path: {result.stderr.strip()}")
+        try:
+            ms_metadata = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            sys.exit(f"Error parsing metadata from run-rename-ms.py: {exc}\nOutput:\n{result.stdout}")
+        args.object_name = args.object_name or ms_metadata["object_name"]
+        args.observation_date = args.observation_date or ms_metadata["observation_date"]
+
+        workdir, ms_path = rename_workdir_and_measurement_set(
+            workdir,
+            args.project_code,
+            args.object_name,
+            args.observation_date,
+            ms_path,
+        )
+
+    if args.object_name and args.observation_date:
+        measurement_set_name = f"{args.project_code}.{args.object_name}.{args.observation_date}.ms"
+        if ms_path.name != measurement_set_name:
+            ms_path = ms_path.rename(workdir / measurement_set_name)
+
+    source_name = args.source_name or args.object_name
+    measurement_set_name = f"{args.project_code}.{args.object_name}.{args.observation_date}.ms"
     prep_script_path = workdir / "prep-ms-for-auto-selfcal.py"
     print(f"Patching prep script at {prep_script_path}")
     patch_prep_script(

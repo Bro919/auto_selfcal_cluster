@@ -357,7 +357,7 @@ def main():
                 sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
         # Clean up temp directory
         try:
-            if temp_dir.exists():
+            if 'temp_dir' in locals() and temp_dir.exists():
                 shutil.rmtree(str(temp_dir))
         except Exception as e:
             print(f"Warning: Could not remove temporary download directory: {e}")

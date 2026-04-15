@@ -310,13 +310,17 @@ def main():
         ]
         if args.project_code:
             ms_command.extend(["--project-code", args.project_code])
-        result = subprocess.run(ms_command, capture_output=True, text=True)
-        if result.returncode != 0:
-            sys.exit(f"Error extracting metadata from MS path: {result.stderr.strip()}")
+        result = subprocess.Popen(ms_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = result.communicate()
+        returncode = result.returncode
+        stdout_text = stdout.decode('utf-8', errors='replace')
+        stderr_text = stderr.decode('utf-8', errors='replace')
+        if returncode != 0:
+            sys.exit(f"Error extracting metadata from MS path: {stderr_text.strip()}")
         try:
-            ms_metadata = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            sys.exit(f"Error parsing metadata from run-rename-ms.py: {exc}\nOutput:\n{result.stdout}")
+            ms_metadata = json.loads(stdout_text)
+        except ValueError as exc:
+            sys.exit(f"Error parsing metadata from run-rename-ms.py: {exc}\nOutput:\n{stdout_text}")
         args.project_code = args.project_code or ms_metadata["project_code"]
         args.object_name = args.object_name or ms_metadata["object_name"]
         args.observation_date = args.observation_date or ms_metadata["observation_date"]

@@ -13,8 +13,8 @@ def parse_args():
     )
     parser.add_argument("project_code", nargs='?', help="Project code, e.g. 23A-241")
     parser.add_argument("object_name", nargs='?', help="Object name, e.g. AT2019ehz")
-    parser.add_argument("url", nargs='?', help="URL to download from")
     parser.add_argument("observation_date", nargs='?', help="Observation date, e.g. 2023-07-22")
+    parser.add_argument("--url", help="URL to download from")
     parser.add_argument("--ms-path", help="Path to the measurement set to scrape project/object/date metadata from")
     parser.add_argument("--asc", default="ASC", help="ASC template directory or path (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Enable A_config in the prep script")
@@ -251,19 +251,33 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
 
 def main():
     args = parse_args()
-    if not args.project_code or not args.url:
-        sys.exit("Usage error: project_code and url must be provided.")
 
+    if args.project_code and args.project_code.startswith("url="):
+        args.url = args.project_code.split("=", 1)[1]
+        args.project_code = None
+
+    if not args.url and args.object_name and args.object_name.startswith("url="):
+        args.url = args.object_name.split("=", 1)[1]
+        args.object_name = None
+
+    if not args.url and args.observation_date and args.observation_date.startswith("url="):
+        args.url = args.observation_date.split("=", 1)[1]
+        args.observation_date = None
+
+    if not args.url:
+        sys.exit("Usage error: url must be provided, either as --url or as url=<value>.")
+
+    build_project_code = args.project_code or "unknown"
     build_object = args.object_name or "unknown"
     build_date = args.observation_date or "unknown"
     script_dir = Path(__file__).resolve().parent
-    workdir = compute_workdir(args.project_code, build_object, build_date)
+    workdir = compute_workdir(build_project_code, build_object, build_date)
     source_name = args.source_name or build_object
 
     build_cmd = [
         sys.executable,
         str(script_dir / "build_dir.py"),
-        args.project_code,
+        build_project_code,
         build_object,
         args.url,
         build_date,
@@ -291,11 +305,11 @@ def main():
             sys.executable,
             str(script_dir / "run-rename-ms.py"),
             str(ms_path),
-            "--project-code",
-            args.project_code,
             "--output-format",
             "json",
         ]
+        if args.project_code:
+            ms_command.extend(["--project-code", args.project_code])
         result = subprocess.run(ms_command, capture_output=True, text=True)
         if result.returncode != 0:
             sys.exit(f"Error extracting metadata from MS path: {result.stderr.strip()}")
@@ -303,6 +317,7 @@ def main():
             ms_metadata = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             sys.exit(f"Error parsing metadata from run-rename-ms.py: {exc}\nOutput:\n{result.stdout}")
+        args.project_code = args.project_code or ms_metadata["project_code"]
         args.object_name = args.object_name or ms_metadata["object_name"]
         args.observation_date = args.observation_date or ms_metadata["observation_date"]
 

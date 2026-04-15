@@ -36,6 +36,74 @@ def parse_renamed_mspath(ms_path):
     return None
 
 
+def normalize_date_token(token):
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", token):
+        return token
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})$", token)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})[-_].*$", token)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return None
+
+
+def infer_metadata_from_path(ms_path, project_code_override=None):
+    project_code = project_code_override
+    segments = [Path(seg).name for seg in (Path(ms_path).parents)] + [Path(ms_path).name]
+
+    if project_code is None:
+        for segment in segments:
+            if re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', segment):
+                project_code = segment
+                break
+
+    date_candidate = None
+    target_candidate = None
+
+    for segment in segments:
+        parts = segment.split('.')
+        if len(parts) >= 3:
+            maybe_date = normalize_date_token(parts[-1])
+            if maybe_date:
+                date_candidate = maybe_date
+                if project_code is None and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parts[0]):
+                    project_code = parts[0]
+                if len(parts) >= 3:
+                    target_candidate = '.'.join(parts[1:-1])
+                break
+
+    if date_candidate is None:
+        for segment in segments:
+            maybe_date = normalize_date_token(segment)
+            if maybe_date:
+                date_candidate = maybe_date
+                break
+
+    if target_candidate is None and project_code and date_candidate:
+        for segment in segments:
+            if project_code in segment and date_candidate.replace('-', '') in segment:
+                parts = segment.split('.')
+                if len(parts) >= 3:
+                    target_candidate = '.'.join(parts[1:-1])
+                    break
+
+    if target_candidate is None:
+        parent_name = Path(ms_path).parent.name
+        if parent_name and parent_name != project_code and normalize_date_token(parent_name) is None:
+            target_candidate = parent_name
+
+    if date_candidate is None:
+        for segment in segments:
+            if "date" in segment.lower():
+                maybe_date = normalize_date_token(segment)
+                if maybe_date:
+                    date_candidate = maybe_date
+                    break
+
+    return project_code, target_candidate, date_candidate
+
+
 def format_date_from_mjd(mjd_value):
     if Time is None:
         raise RuntimeError("astropy is required to convert MJD timestamps. Install astropy and retry.")
@@ -93,24 +161,22 @@ def extract_ms_metadata(ms_path, field_index=2, project_code_override=None):
         return project_code, target, obs_date
 
     project_code = project_code_override
-    if project_code is None:
-        stem_parts = ms_path.stem.split('.')
-        if stem_parts and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', stem_parts[0]):
-            project_code = stem_parts[0]
-        elif ms_path.parent.name:
-            parent_parts = ms_path.parent.name.split('.')
-            if parent_parts and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parent_parts[0]):
-                project_code = parent_parts[0]
 
     result = extract_from_casacore(ms_path, field_index)
     if result is not None:
         target, obs_date = result
+        if project_code is None:
+            project_code = infer_metadata_from_path(ms_path, project_code_override)[0]
         if project_code is None:
             raise RuntimeError(
                 "Project code could not be inferred from the MS path. "
                 "Provide --project-code or use a renamed MS path."
             )
         return project_code, target, obs_date
+
+    path_project, path_target, path_date = infer_metadata_from_path(ms_path, project_code_override)
+    if path_project and path_target and path_date:
+        return path_project, path_target, path_date
 
     raise RuntimeError(
         "Could not extract target and observation date from the measurement set. "

@@ -4,7 +4,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 
 def parse_args():
@@ -68,7 +68,7 @@ def rename_workdir_and_measurement_set(
     object_name: str,
     observation_date: str,
     old_ms_path: Path,
-) -> tuple[Path, Path]:
+) -> Tuple[Path, Path]:
     measurement_set_name = f"{project_code}.{object_name}.{observation_date}.ms"
     new_workdir = compute_workdir(project_code, object_name, observation_date)
     old_ms_name = old_ms_path.name

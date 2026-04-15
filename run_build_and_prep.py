@@ -28,7 +28,12 @@ def parse_args():
     parser.add_argument(
         "--run-casa",
         action="store_true",
-        help="Launch interactive CASA after building the workdir and execfile the prep script",
+        help="Launch interactive CASA after building the workdir and execute the prep and submit scripts",
+    )
+    parser.add_argument(
+        "--skip-submit",
+        action="store_true",
+        help="Do not run submit_batch_of_batch_jobs.py after the prep script completes",
     )
     parser.add_argument(
         "--casa-executable",
@@ -122,16 +127,15 @@ def patch_prep_script(
     prep_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
 
 
-def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str) -> None:
+def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str, skip_submit: bool) -> None:
     try:
-        import pexpect
         import os
+        import pexpect
     except ImportError as exc:
         raise RuntimeError(
             "pexpect is required to launch CASA automatically. Install it with 'pip install pexpect'"
         ) from exc
 
-    # Set environment to run CASA headless
     env = os.environ.copy()
     env['QT_QPA_PLATFORM'] = 'offscreen'
 
@@ -147,25 +151,23 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
             timeout=30,
             logfile=sys.stdout,
         )
-        binary_mode = False
     else:
         child = pexpect.spawn(
             command[0],
             args=command[1:],
             cwd=str(workdir),
             env=env,
+            encoding="utf-8",
             timeout=30,
-            logfile=sys.stdout.buffer,
+            logfile=sys.stdout,
         )
-        binary_mode = True
 
-    def strip_ansi(text: Union[bytes, str]) -> str:
-        if isinstance(text, bytes):
-            text = text.decode('utf-8', errors='ignore')
+    def strip_ansi(text: str) -> str:
         return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
 
-    prompt_patterns = [b"CASA <\\d+>:", b">>> ", b"^> ", br"^[^\n]*\$ "] if binary_mode else [r"CASA <\d+>:", r">>> ", r"^> ", r"^[^\n]*\$ "]
-    accumulated_output = b"" if binary_mode else ""
+    prompt_patterns = [r"CASA <\d+>:", r">>> ", r"^> ", r"^[^\n]*\$ "]
+    prompt_found = False
+    accumulated_output = ""
     for attempt in range(12):
         try:
             index = child.expect(prompt_patterns, timeout=10)
@@ -185,19 +187,31 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
             "Could not detect CASA prompt after launch. Output:\n" + strip_ansi(accumulated_output)
         )
 
-    prep_command = f"execfile('{prep_script_path}')"
-    print(f"Executing prep script inside CASA: {prep_command}")
-    if binary_mode:
-        child.sendline(prep_command.encode('utf-8'))
-    else:
-        child.sendline(prep_command)
+    def run_casa_command(command_text: str, description: str) -> bool:
+        print(f"Executing {description} inside CASA: {command_text}")
+        child.sendline(command_text)
+        try:
+            child.expect(prompt_patterns, timeout=1200)
+            print(f"{description} completed and CASA prompt returned.")
+            return True
+        except pexpect.exceptions.TIMEOUT:
+            print(f"Warning: {description} did not return to prompt within timeout.")
+            return False
 
-    # Wait for prep script to finish and return to the CASA prompt
-    try:
-        child.expect(prompt_patterns, timeout=1200)
-        print("Prep script completed and CASA prompt returned.")
-    except pexpect.exceptions.TIMEOUT:
-        print("Warning: CASA prep script did not return to prompt within timeout; handing over to interactive session anyway.")
+    prep_command = f"execfile('{prep_script_path}')"
+    if not run_casa_command(prep_command, 'prep script'):
+        child.interact(escape_character=None)
+        return
+
+    if skip_submit:
+        print("Skipping submit batch execution as requested.")
+        child.interact(escape_character=None)
+        return
+
+    submit_command = "execfile('submit_batch_of_batch_jobs.py')"
+    if not run_casa_command(submit_command, 'submit batch script'):
+        child.interact(escape_character=None)
+        return
 
     child.interact(escape_character=None)
 
@@ -205,10 +219,7 @@ def main():
     args = parse_args()
     script_dir = Path(__file__).resolve().parent
     workdir = compute_workdir(args.project_code, args.object_name, args.observation_date)
-    if args.source_name is None:
-        source_name = args.object_name
-    else:
-        source_name = args.source_name
+    source_name = args.source_name or args.object_name
     measurement_set_name = f"{args.project_code}.{args.object_name}.{args.observation_date}.ms"
 
     build_cmd = [
@@ -257,6 +268,7 @@ def main():
             args.casa_executable,
             workdir,
             prep_script_path.name,
+            args.skip_submit,
         )
     else:
         print("To launch CASA manually, run:")

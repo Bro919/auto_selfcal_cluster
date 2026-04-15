@@ -131,6 +131,10 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
             "pexpect is required to launch CASA automatically. Install it with 'pip install pexpect'"
         ) from exc
 
+    # Set environment to run CASA headless
+    env = os.environ.copy()
+    env['QT_QPA_PLATFORM'] = 'offscreen'
+
     command = casa_executable
     print(f"Spawning CASA executable: {casa_executable}")
     if os.name == 'nt':
@@ -138,6 +142,7 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
         child = popen_spawn.PopenSpawn(
             [command],
             cwd=workdir,
+            env=env,
             encoding="utf-8",
             timeout=30,
             logfile=sys.stdout,
@@ -146,22 +151,30 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
         child = pexpect.spawn(
             command,
             cwd=str(workdir),
+            env=env,
             encoding="utf-8",
             timeout=30,
             logfile=sys.stdout,
         )
 
-    prompt_patterns = [r"CASA <\d+>", r">>> ", r"^> ", r"^[^\n]*\$ "]
+    # Wait for CASA to fully start up - it takes time
+    prompt_patterns = [r"CASA <\d+>:", r">>> ", r"^> ", r"^[^\n]*\$ "]
     try:
-        child.expect(prompt_patterns, timeout=60)
+        index = child.expect(prompt_patterns, timeout=120)  # Increased timeout for CASA startup
+        print(f"Detected CASA prompt (pattern {index})")
     except pexpect.exceptions.TIMEOUT:
-        raise RuntimeError(
-            "Could not detect CASA prompt after launch. Output:\n" + child.before
-        )
+        print("Warning: Could not detect CASA prompt within timeout, proceeding anyway...")
+        print("Recent output:", child.before[-500:])  # Show last 500 chars
 
     prep_command = f"execfile('{prep_script_path}')"
     print(f"Executing prep script inside CASA: {prep_command}")
     child.sendline(prep_command)
+
+    # Give it a moment to process the command
+    import time
+    time.sleep(2)
+
+    # Now hand over to user
     child.interact()
 
 def main():

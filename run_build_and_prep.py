@@ -157,14 +157,31 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
             logfile=sys.stdout,
         )
 
-    # Wait for CASA to fully start up - it takes time
+    # Wait for CASA to fully start up - it takes time and may emit ANSI color codes.
+    def strip_ansi(text: str) -> str:
+        return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+
     prompt_patterns = [r"CASA <\d+>:", r">>> ", r"^> ", r"^[^\n]*\$ "]
-    try:
-        index = child.expect(prompt_patterns, timeout=120)  # Increased timeout for CASA startup
-        print(f"Detected CASA prompt (pattern {index})")
-    except pexpect.exceptions.TIMEOUT:
-        print("Warning: Could not detect CASA prompt within timeout, proceeding anyway...")
-        print("Recent output:", child.before[-500:])  # Show last 500 chars
+    prompt_found = False
+    accumulated_output = ""
+    for attempt in range(12):
+        try:
+            index = child.expect(prompt_patterns, timeout=10)
+            print(f"Detected CASA prompt (pattern {index})")
+            prompt_found = True
+            break
+        except pexpect.exceptions.TIMEOUT:
+            accumulated_output += child.before
+            if re.search(r"CASA <\d+>:", strip_ansi(accumulated_output)):
+                print("Detected CASA prompt after stripping ANSI escape sequences.")
+                prompt_found = True
+                break
+            print(f"Waiting for CASA prompt... (attempt {attempt + 1}/12)")
+
+    if not prompt_found:
+        raise RuntimeError(
+            "Could not detect CASA prompt after launch. Output:\n" + strip_ansi(accumulated_output)
+        )
 
     prep_command = f"execfile('{prep_script_path}')"
     print(f"Executing prep script inside CASA: {prep_command}")

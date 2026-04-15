@@ -3,7 +3,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 
 def parse_args():
@@ -135,35 +135,37 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
     env = os.environ.copy()
     env['QT_QPA_PLATFORM'] = 'offscreen'
 
-    command = casa_executable
-    print(f"Spawning CASA executable: {casa_executable}")
+    command = [casa_executable, "--nogui"]
+    print(f"Spawning CASA executable: {' '.join(command)}")
     if os.name == 'nt':
         from pexpect import popen_spawn
         child = popen_spawn.PopenSpawn(
-            [command],
+            command,
             cwd=workdir,
             env=env,
             encoding="utf-8",
             timeout=30,
             logfile=sys.stdout,
         )
+        binary_mode = False
     else:
         child = pexpect.spawn(
-            command,
+            command[0],
+            args=command[1:],
             cwd=str(workdir),
             env=env,
-            encoding="utf-8",
             timeout=30,
-            logfile=sys.stdout,
+            logfile=sys.stdout.buffer,
         )
+        binary_mode = True
 
-    # Wait for CASA to fully start up - it takes time and may emit ANSI color codes.
-    def strip_ansi(text: str) -> str:
+    def strip_ansi(text: Union[bytes, str]) -> str:
+        if isinstance(text, bytes):
+            text = text.decode('utf-8', errors='ignore')
         return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
 
-    prompt_patterns = [r"CASA <\d+>:", r">>> ", r"^> ", r"^[^\n]*\$ "]
-    prompt_found = False
-    accumulated_output = ""
+    prompt_patterns = [b"CASA <\\d+>:", b">>> ", b"^> ", br"^[^\n]*\$ "] if binary_mode else [r"CASA <\d+>:", r">>> ", r"^> ", r"^[^\n]*\$ "]
+    accumulated_output = b"" if binary_mode else ""
     for attempt in range(12):
         try:
             index = child.expect(prompt_patterns, timeout=10)
@@ -185,14 +187,19 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
 
     prep_command = f"execfile('{prep_script_path}')"
     print(f"Executing prep script inside CASA: {prep_command}")
-    child.sendline(prep_command)
+    if binary_mode:
+        child.sendline(prep_command.encode('utf-8'))
+    else:
+        child.sendline(prep_command)
 
-    # Give it a moment to process the command
-    import time
-    time.sleep(2)
+    # Wait for prep script to finish and return to the CASA prompt
+    try:
+        child.expect(prompt_patterns, timeout=1200)
+        print("Prep script completed and CASA prompt returned.")
+    except pexpect.exceptions.TIMEOUT:
+        print("Warning: CASA prep script did not return to prompt within timeout; handing over to interactive session anyway.")
 
-    # Now hand over to user
-    child.interact()
+    child.interact(escape_character=None)
 
 def main():
     args = parse_args()

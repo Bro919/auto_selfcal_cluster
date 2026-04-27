@@ -81,13 +81,33 @@ def scrape_listfile(listfile, source_name):
     
     df_date_format = "%Y %b %d"
     configuration = None
+    schedule_rows = []
     # find the row in the schedule dataframe that encapsulates the observation
     for i, row in df_schedule.iterrows():
         start_epoch = datetime.strptime(row["observing_start"], df_date_format)
         end_epoch = datetime.strptime(row["observing_end"], df_date_format)
-    
+        schedule_rows.append((start_epoch, end_epoch, row["configuration"]))
+
         if (start_epoch <= date0) and (date0 < end_epoch):
             configuration = row["configuration"]
+
+    if configuration is None:
+        # Fall back to the nearest schedule row if the schedule file has a small gap.
+        prev_rows = [r for r in schedule_rows if r[0] <= date0]
+        if prev_rows:
+            configuration = prev_rows[-1][2]
+            print(
+                f"Warning: observation date {date0.date()} did not match any exact schedule range. "
+                f"Using the most recent configuration '{configuration}' from {prev_rows[-1][0].date()} to {prev_rows[-1][1].date()}."
+            )
+        else:
+            next_rows = [r for r in schedule_rows if r[0] > date0]
+            if next_rows:
+                configuration = next_rows[0][2]
+                print(
+                    f"Warning: observation date {date0.date()} did not match any exact schedule range. "
+                    f"Using the next available configuration '{configuration}' from {next_rows[0][0].date()} to {next_rows[0][1].date()}."
+                )
 
     if configuration is None:
         raise RuntimeError(

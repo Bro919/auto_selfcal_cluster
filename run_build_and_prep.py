@@ -14,6 +14,11 @@ def parse_args():
     parser.add_argument("project_code", nargs='?', help="Project code, e.g. 23A-241")
     parser.add_argument("object_name", nargs='?', help="Object name, e.g. AT2019ehz")
     parser.add_argument("observation_date", nargs='?', help="Observation date, e.g. 2023-07-22")
+    parser.add_argument(
+        "url_arg",
+        nargs='?',
+        help="Optional URL argument, either raw URL or url=<value> after the positional args",
+    )
     parser.add_argument("--url", help="URL to download from")
     parser.add_argument("--ms-path", help="Path to the measurement set to scrape project/object/date metadata from")
     parser.add_argument(
@@ -269,8 +274,16 @@ def main():
         args.url = args.observation_date.split("=", 1)[1]
         args.observation_date = None
 
+    if not args.url and args.url_arg:
+        if args.url_arg.startswith("url="):
+            args.url = args.url_arg.split("=", 1)[1]
+        else:
+            args.url = args.url_arg
+
     if not args.url:
-        sys.exit("Usage error: url must be provided, either as --url or as url=<value>.")
+        sys.exit(
+            "Usage error: url must be provided either with --url or as a positional argument like url=<value> or <raw-url>."
+        )
 
     build_project_code = args.project_code or "unknown"
     build_object = args.object_name or "unknown"

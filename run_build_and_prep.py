@@ -16,6 +16,11 @@ def parse_args():
     parser.add_argument("observation_date", nargs='?', help="Observation date, e.g. 2023-07-22")
     parser.add_argument("--url", help="URL to download from")
     parser.add_argument("--ms-path", help="Path to the measurement set to scrape project/object/date metadata from")
+    parser.add_argument(
+        "--use-ms-metadata",
+        action="store_true",
+        help="When object_name or observation_date are missing, extract them from the downloaded .ms instead of failing.",
+    )
     parser.add_argument("--asc", default="ASC", help="ASC template directory or path (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Enable A_config in the prep script")
 
@@ -301,9 +306,20 @@ def main():
         sys.exit(f"Error: No .ms directory found in workdir {workdir}")
 
     if not args.object_name or not args.observation_date:
+        if not args.use_ms_metadata:
+            missing = []
+            if not args.object_name:
+                missing.append("object_name")
+            if not args.observation_date:
+                missing.append("observation_date")
+            sys.exit(
+                "Missing metadata: {}. Provide these manually or rerun with --use-ms-metadata to extract them from the downloaded .ms."
+                .format(", ".join(missing))
+            )
+
         ms_command = [
             sys.executable,
-            str(script_dir / "run-rename-ms.py"),
+            str(script_dir / "metadata-scrapper.py"),
             str(ms_path),
             "--output-format",
             "json",
@@ -320,7 +336,7 @@ def main():
         try:
             ms_metadata = json.loads(stdout_text)
         except ValueError as exc:
-            sys.exit(f"Error parsing metadata from run-rename-ms.py: {exc}\nOutput:\n{stdout_text}")
+            sys.exit(f"Error parsing metadata from metadata-scrapper.py: {exc}\nOutput:\n{stdout_text}")
         args.project_code = args.project_code or ms_metadata["project_code"]
         args.object_name = args.object_name or ms_metadata["object_name"]
         args.observation_date = args.observation_date or ms_metadata["observation_date"]

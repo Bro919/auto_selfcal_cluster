@@ -80,6 +80,7 @@ def scrape_listfile(listfile, source_name):
     date1 = datetime.strptime(t1, lf_date_format)
     
     df_date_format = "%Y %b %d"
+    configuration = None
     # find the row in the schedule dataframe that encapsulates the observation
     for i, row in df_schedule.iterrows():
         start_epoch = datetime.strptime(row["observing_start"], df_date_format)
@@ -87,7 +88,13 @@ def scrape_listfile(listfile, source_name):
     
         if (start_epoch <= date0) and (date0 < end_epoch):
             configuration = row["configuration"]
-    
+
+    if configuration is None:
+        raise RuntimeError(
+            f"Could not determine VLA configuration for observation date {date0.date()} from vla-configuration-schedule.csv. "
+            "Check the schedule file or adjust the observation date in the prep script."
+        )
+
     # CELL SIZE ==============================================
     #central_freq = (df_resolution[df_resolution["band"] == band]["central_freq"].values[0]).item()
     #synthesized_beamwidth = df_resolution[df_resolution["band"] == band][configuration].values[0].item()

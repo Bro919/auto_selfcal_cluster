@@ -395,15 +395,18 @@ def main():
                 if args.a_config:
                     lines[i] = 'A_config = True  # Set to True to use special resources for L band\n'
                 else:
-                    lines[i] = ''
-        if args.a_config and not a_config_found:
+                    lines[i] = 'A_config = False  # Set to True to use special resources for L band\n'
+        if not a_config_found:
             insert_idx = 0
             for idx, line in enumerate(lines):
                 if line.startswith('import') or line.strip() == '':
                     insert_idx = idx + 1
-            lines.insert(insert_idx, 'A_config = True  # Set to True to use special resources for L band\n')
+            if args.a_config:
+                lines.insert(insert_idx, 'A_config = True  # Set to True to use special resources for L band\n')
+            else:
+                lines.insert(insert_idx, 'A_config = False  # Set to True to use special resources for L band\n')
         with prep_script.open("w", encoding="utf-8") as f:
-            f.writelines([l for l in lines if l.strip() != ''])
+            f.writelines(lines)
         print(f"Updated {prep_script} with measurement_set, source_name, and A_config.")
     else:
         print(f"Warning: {prep_script} not found.")

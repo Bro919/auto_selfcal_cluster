@@ -165,6 +165,15 @@ def patch_prep_script(
             break
         updated_lines.insert(insert_idx, f'auto_sc_files_directory = "{auto_sc_dir}"')
 
+    if "A_config" not in found_keys:
+        insert_idx = 0
+        for idx, line in enumerate(updated_lines):
+            if line.startswith("#") or line.strip() == "":
+                continue
+            insert_idx = idx
+            break
+        updated_lines.insert(insert_idx, f'A_config = {str(a_config)}  # Set to True to use special resources for L band')
+
     if "measurement_set" not in found_keys:
         raise RuntimeError("Could not find measurement_set assignment in prep script")
 
@@ -183,8 +192,21 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
     env = os.environ.copy()
     env['QT_QPA_PLATFORM'] = 'offscreen'
 
+    class _PexpectStdoutLogger:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def write(self, data):
+            if isinstance(data, bytes):
+                data = data.decode("utf-8", errors="replace")
+            self.stream.write(data)
+
+        def flush(self):
+            self.stream.flush()
+
     command = [casa_executable, "--nogui"]
     print(f"Spawning CASA executable: {' '.join(command)}")
+    logger = _PexpectStdoutLogger(sys.stdout)
     if os.name == 'nt':
         from pexpect import popen_spawn
         child = popen_spawn.PopenSpawn(
@@ -193,7 +215,7 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
             env=env,
             encoding="utf-8",
             timeout=30,
-            logfile=sys.stdout,
+            logfile=logger,
         )
     else:
         child = pexpect.spawn(
@@ -203,7 +225,7 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
             env=env,
             encoding="utf-8",
             timeout=30,
-            logfile=sys.stdout,
+            logfile=logger,
         )
 
     def strip_ansi(text: str) -> str:

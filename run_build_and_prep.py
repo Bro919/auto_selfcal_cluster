@@ -20,11 +20,14 @@ def parse_args():
         help="Optional URL argument, either raw URL or url=<value> after the positional args",
     )
     parser.add_argument("--url", help="URL to download from")
-    parser.add_argument("--ms-path", help="Path to the measurement set to scrape project/object/date metadata from")
+    parser.add_argument(
+        "--ms-path",
+        help="Path to a local measurement set directory or extracted SDM-BDF root for metadata extraction and local workdir creation",
+    )
     parser.add_argument(
         "--use-ms-metadata",
         action="store_true",
-        help="When object_name or observation_date are missing, extract them from the downloaded .ms instead of failing.",
+        help="When object_name or observation_date are missing, extract them from the downloaded .ms or local MS path instead of failing.",
     )
     parser.add_argument("--asc", default="ASC", help="ASC template directory or path (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Enable A_config in the prep script")
@@ -65,11 +68,87 @@ def compute_workdir(project_code: str, object_name: str, observation_date: str) 
 
 
 def find_ms_directory(root_dir: Path) -> Path:
+    if is_ms_dir(root_dir):
+        return root_dir
     candidates = [p for p in root_dir.iterdir() if p.is_dir() and p.name.endswith('.ms')]
     if candidates:
         return candidates[0]
     candidates = [p for p in root_dir.rglob('*') if p.is_dir() and p.name.endswith('.ms')]
     return candidates[0] if candidates else None
+
+
+def copy_tree(src: Path, dst: Path) -> None:
+    src = Path(src)
+    dst = Path(dst)
+    if not src.exists():
+        raise FileNotFoundError(f"Source path not found: {src}")
+    dst.mkdir(parents=True, exist_ok=True)
+    for item in src.iterdir():
+        dest_item = dst / item.name
+        if item.is_dir():
+            shutil.copytree(str(item), str(dest_item))
+        else:
+            shutil.copy2(str(item), str(dest_item))
+
+
+def resolve_local_measurement_set(input_path: Path) -> Path:
+    if is_ms_dir(input_path):
+        return input_path
+    if input_path.is_dir():
+        ms_dir = find_ms_directory(input_path)
+        if ms_dir is not None:
+            return ms_dir
+    return None
+
+
+def scrape_local_metadata(input_path: Path, project_code: str | None = None) -> dict:
+    script_dir = Path(__file__).resolve().parent
+    command = [
+        sys.executable,
+        str(script_dir / "metadata-scrapper.py"),
+        str(input_path),
+        "--output-format",
+        "json",
+    ]
+    if project_code:
+        command.extend(["--project-code", project_code])
+
+    result = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = result.communicate()
+    stdout_text = stdout.decode("utf-8", errors="replace")
+    stderr_text = stderr.decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        raise RuntimeError(stderr_text.strip() or f"metadata-scrapper failed with code {result.returncode}")
+    try:
+        return json.loads(stdout_text)
+    except ValueError as exc:
+        raise RuntimeError(f"Could not parse metadata-scrapper output: {exc}\nOutput:\n{stdout_text}") from exc
+
+
+def prepare_workdir_from_local_input(
+    input_path: Path,
+    workdir: Path,
+    project_code: str,
+    object_name: str,
+    observation_date: str,
+    asc_template: str,
+) -> Path:
+    workdir.mkdir(parents=True, exist_ok=False)
+    ms_source = resolve_local_measurement_set(input_path)
+    if ms_source is None:
+        raise RuntimeError(
+            f"Could not locate a measurement set under local path: {input_path}. "
+            "Provide a path to a .ms directory or a directory containing an MS."
+        )
+    desired_ms_name = f"{project_code}.{object_name}.{observation_date}.ms"
+    dest_ms_path = workdir / desired_ms_name
+    if ms_source.resolve() != dest_ms_path.resolve():
+        shutil.copytree(str(ms_source), str(dest_ms_path))
+    template_src = Path(asc_template) if Path(asc_template).is_absolute() else (Path.cwd() / asc_template)
+    if not template_src.exists():
+        raise FileNotFoundError(f"ASC template directory does not exist: {template_src}")
+    copy_tree(template_src, workdir)
+    return dest_ms_path
 
 
 def rename_workdir_and_measurement_set(
@@ -301,6 +380,93 @@ def main():
             args.url = args.url_arg.split("=", 1)[1]
         else:
             args.url = args.url_arg
+
+    if args.ms_path:
+        ms_input = Path(args.ms_path)
+        if not ms_input.exists():
+            sys.exit(f"Error: --ms-path does not exist: {ms_input}")
+        if args.url:
+            print("Warning: --ms-path provided; ignoring --url and using local input instead.")
+
+        if args.use_ms_metadata or not (args.project_code and args.object_name and args.observation_date):
+            try:
+                metadata = scrape_local_metadata(ms_input, args.project_code)
+            except RuntimeError as exc:
+                sys.exit(f"Error extracting metadata from local input: {exc}")
+            args.project_code = args.project_code or metadata.get("project_code")
+            args.object_name = args.object_name or metadata.get("object_name")
+            args.observation_date = args.observation_date or metadata.get("observation_date")
+
+        missing = [
+            name
+            for name, value in [
+                ("project_code", args.project_code),
+                ("object_name", args.object_name),
+                ("observation_date", args.observation_date),
+            ]
+            if not value
+        ]
+        if missing:
+            sys.exit(
+                "Missing metadata: {}. Provide these manually or supply an input path with enough metadata."
+                .format(", ".join(missing))
+            )
+
+        build_project_code = args.project_code
+        build_object = args.object_name
+        build_date = args.observation_date
+        script_dir = Path(__file__).resolve().parent
+        workdir = compute_workdir(build_project_code, build_object, build_date)
+
+        if args.dry_run:
+            print(f"Dry run enabled. Would create workdir from local input: {ms_input}")
+            print(f"Workdir would be: {workdir}")
+            return
+
+        try:
+            ms_path = prepare_workdir_from_local_input(
+                ms_input,
+                workdir,
+                build_project_code,
+                build_object,
+                build_date,
+                args.asc,
+            )
+        except Exception as exc:
+            sys.exit(f"Error preparing workdir from local input: {exc}")
+
+        source_name = args.source_name or build_object
+        prep_script_path = workdir / "prep-ms-for-auto-selfcal.py"
+        print(f"Patching prep script at {prep_script_path}")
+        patch_prep_script(
+            prep_script_path,
+            measurement_set=ms_path.name,
+            source_name=source_name,
+            split_band=args.split_band,
+            use_single_band=args.use_single_band,
+            single_band=args.single_band,
+            use_single_freq=args.use_single_freq,
+            single_freq=args.single_freq,
+            a_config=args.a_config,
+            auto_sc_dir=args.auto_sc_dir,
+        )
+
+        print("Prep script patched successfully.")
+        print(f"Workdir ready at: {workdir.resolve()}")
+
+        if args.run_casa:
+            print("Launching interactive CASA in the workdir and executing the prep script...")
+            launch_casa_and_exec_prep(
+                args.casa_executable,
+                workdir,
+                prep_script_path.name,
+                args.skip_submit,
+            )
+        else:
+            print("To launch CASA manually, run:")
+            print(f"  cd {workdir}")
+            print(f"  {args.casa_executable}")
+        return
 
     if not args.url:
         sys.exit(

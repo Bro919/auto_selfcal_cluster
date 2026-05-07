@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -65,6 +66,16 @@ def parse_args():
 
 def compute_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
     return Path(f"{project_code}.{object_name}.{observation_date}")
+
+
+def is_ms_dir(path: Path) -> bool:
+    path = Path(path)
+    if not path.is_dir():
+        return False
+    if path.suffix == ".ms":
+        return True
+    folder_names = {child.name.upper() for child in path.iterdir() if child.is_dir()}
+    return bool(folder_names & {"FIELD", "MAIN", "ANTENNA", "SOURCE", "SPECTRAL_WINDOW", "OBSERVATION"})
 
 
 def find_ms_directory(root_dir: Path) -> Path:

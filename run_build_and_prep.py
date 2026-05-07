@@ -101,7 +101,7 @@ def resolve_local_measurement_set(input_path: Path) -> Path:
     return None
 
 
-def scrape_local_metadata(input_path: Path, project_code: str | None = None) -> dict:
+def scrape_local_metadata(input_path: Path, project_code: Optional[str] = None) -> dict:
     script_dir = Path(__file__).resolve().parent
     command = [
         sys.executable,

@@ -399,7 +399,7 @@ def main():
         if args.url:
             print("Warning: --ms-path provided; ignoring --url and using local input instead.")
 
-        if args.use_ms_metadata or not (args.project_code and args.object_name and args.observation_date):
+        if args.use_ms_metadata:
             try:
                 metadata = scrape_local_metadata(ms_input, args.project_code)
             except RuntimeError as exc:

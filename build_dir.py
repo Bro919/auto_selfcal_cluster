@@ -314,25 +314,18 @@ def main():
             if not extracted_dirs:
                 sys.exit("Error: No extracted directories found.")
             if len(extracted_dirs) > 1:
-                print("Warning: Multiple extracted directories found; using the first one.")
-            top_dir = extracted_dirs[0]
+                print("Warning: Multiple extracted directories found; searching all of them for .ms directories.")
             ms_dirs = []
-            if top_dir.name.endswith('.ms'):
-                ms_dirs.append(top_dir)
-            else:
-                ms_dirs = [p for p in top_dir.rglob('*') if p.is_dir() and p.name.endswith('.ms')]
-            ms_dir = None
-            if not ms_dirs:
-                inner_dirs = [p for p in top_dir.iterdir() if p.is_dir()]
-                if len(inner_dirs) == 1:
-                    ms_dir = inner_dirs[0]
-                    print(f"No .ms dir found; using inner directory {ms_dir.name}")
+            for extracted_dir in extracted_dirs:
+                if extracted_dir.name.endswith('.ms'):
+                    ms_dirs.append(extracted_dir)
                 else:
-                    sys.exit(f"Error: No directory with '.ms' suffix found inside {top_dir}")
-            else:
-                if len(ms_dirs) > 1:
-                    print("Warning: Multiple .ms directories found; using the first one.")
-                ms_dir = ms_dirs[0]
+                    ms_dirs.extend([p for p in extracted_dir.rglob('*') if p.is_dir() and p.name.endswith('.ms')])
+            if not ms_dirs:
+                sys.exit(f"Error: No directory with '.ms' suffix found inside extracted content at {workdir_path}.")
+            if len(ms_dirs) > 1:
+                print("Warning: Multiple .ms directories found; using the first one.")
+            ms_dir = ms_dirs[0]
             target_ms = workdir_path / f"{workdir_name}.ms"
             if target_ms.exists():
                 if target_ms.is_dir():
@@ -343,11 +336,12 @@ def main():
                 shutil.move(str(ms_dir), str(target_ms))
             except Exception as e:
                 sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
-            try:
-                if top_dir.exists() and top_dir.is_dir() and top_dir.resolve() != target_ms.resolve():
-                    shutil.rmtree(str(top_dir))
-            except Exception as e:
-                print(f"Warning: could not remove {top_dir}: {e}")
+            for extracted_dir in extracted_dirs:
+                try:
+                    if extracted_dir.exists() and extracted_dir.is_dir() and extracted_dir.resolve() != target_ms.resolve():
+                        shutil.rmtree(str(extracted_dir))
+                except Exception as e:
+                    print(f"Warning: could not remove {extracted_dir}: {e}")
         else:
             print("No tar file found or extracted. Unable to proceed.")
             

@@ -1,12 +1,15 @@
-import sys
+import os
 import subprocess
+import sys
 
-# install pandas using casa's python
-cmd = ["/home/casa/packages/RHEL7/release/casa-6.6.4-34-py3.8.el8/lib/py/bin/python3.8", "-m", "pip", "install", "pandas"]
-subprocess.run(cmd)
+print(f"Installing pandas into CASA Python: {sys.executable}")
+subprocess.run([sys.executable, "-m", "pip", "install", "--user", "pandas"], check=True)
 
-# append path
-sys.path.append('/lustre/aoc/observers/nm-14416/.local/lib/python3.8/site-packages')
+user_site = os.path.expanduser(
+    f"~/.local/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+)
+if user_site not in sys.path:
+    sys.path.insert(0, user_site)
 
-# import pandas
 import pandas
+print(f"Imported pandas {pandas.__version__}")

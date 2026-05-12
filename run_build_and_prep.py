@@ -271,13 +271,24 @@ def patch_prep_script(
 
 
 def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str, skip_submit: bool) -> None:
-    command = [
-        casa_executable,
-        "--nogui",
-        "-c",
-        f"exec(open('{prep_script_path}').read())",
-    ]
-    print(f"Launching CASA non-interactively: {' '.join(command)}")
+    install_script = workdir / "install_pandas.py"
+    if install_script.exists():
+        command = [
+            casa_executable,
+            "--nogui",
+            "-c",
+            f"exec(open('{install_script.name}').read()); exec(open('{prep_script_path}').read())",
+        ]
+        print(f"Launching CASA non-interactively and installing pandas first: {' '.join(command)}")
+    else:
+        command = [
+            casa_executable,
+            "--nogui",
+            "-c",
+            f"exec(open('{prep_script_path}').read())",
+        ]
+        print(f"Launching CASA non-interactively: {' '.join(command)}")
+
     subprocess.run(command, cwd=workdir, check=True)
 
     if skip_submit:

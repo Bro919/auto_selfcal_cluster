@@ -270,25 +270,39 @@ def patch_prep_script(
     prep_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
 
 
-def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str, skip_submit: bool) -> None:
-    install_script = workdir / "install_pandas.py"
-    if install_script.exists():
-        command = [
-            casa_executable,
-            "--nogui",
-            "-c",
-            f"exec(open('{install_script.name}').read()); exec(open('{prep_script_path}').read())",
-        ]
-        print(f"Launching CASA non-interactively and installing pandas first: {' '.join(command)}")
-    else:
-        command = [
-            casa_executable,
-            "--nogui",
-            "-c",
-            f"exec(open('{prep_script_path}').read())",
-        ]
-        print(f"Launching CASA non-interactively: {' '.join(command)}")
+def write_casa_wrapper_script(workdir: Path, prep_script_path: str) -> Path:
+    wrapper_path = workdir / "__run_prep_with_pandas.py"
+    wrapper_path.write_text(
+        """
+import os
+import sys
 
+sys.path.insert(0, os.getcwd())
+
+try:
+    import pandas as pd
+except Exception:
+    import install_pandas
+    import pandas as pd
+
+print(f'Running prep script with pandas {pd.__version__}')
+
+exec(open('prep-ms-for-auto-selfcal.py').read(), globals())
+""",
+        encoding="utf-8",
+    )
+    return wrapper_path
+
+
+def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str, skip_submit: bool) -> None:
+    wrapper_script = write_casa_wrapper_script(workdir, prep_script_path)
+    command = [
+        casa_executable,
+        "--nogui",
+        "-c",
+        f"exec(open('{wrapper_script.name}').read())",
+    ]
+    print(f"Launching CASA non-interactively: {' '.join(command)}")
     subprocess.run(command, cwd=workdir, check=True)
 
     if skip_submit:

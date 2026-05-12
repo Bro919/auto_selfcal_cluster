@@ -11,5 +11,5 @@ user_site = os.path.expanduser(
 if user_site not in sys.path:
     sys.path.insert(0, user_site)
 
-import pandas
-print(f"Imported pandas {pandas.__version__}")
+import pandas as pd
+print(f"Imported pandas {pd.__version__}")

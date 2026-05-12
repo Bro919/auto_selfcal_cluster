@@ -314,7 +314,7 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
         raise FileNotFoundError(f"Submit script not found at {submit_script}")
 
     print(f"Submitting batch jobs using {submit_script}")
-    subprocess.run([sys.executable, str(submit_script)], cwd=workdir, check=True)
+    subprocess.run([sys.executable, submit_script.name], cwd=workdir, check=True)
 
 def main():
     args = parse_args()

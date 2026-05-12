@@ -10,7 +10,7 @@ from typing import Optional, Tuple, Union
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Build the auto_selfcal workdir, patch the prep script, and optionally launch CASA interactively."
+        description="Build the auto_selfcal workdir, patch the prep script, and optionally launch CASA non-interactively."
     )
     parser.add_argument("project_code", nargs='?', help="Project code, e.g. 23A-241")
     parser.add_argument("object_name", nargs='?', help="Object name, e.g. AT2019ehz")
@@ -44,7 +44,7 @@ def parse_args():
     parser.add_argument(
         "--run-casa",
         action="store_true",
-        help="Launch interactive CASA after building the workdir and execute the prep and submit scripts",
+        help="Launch CASA non-interactively after building the workdir, execute the prep script, and optionally submit batch jobs",
     )
     parser.add_argument(
         "--skip-submit",
@@ -54,7 +54,7 @@ def parse_args():
     parser.add_argument(
         "--casa-executable",
         default="casa",
-        help="CASA executable to use when launching interactive CASA",
+        help="CASA executable to use when launching CASA non-interactively",
     )
     parser.add_argument(
         "--dry-run",
@@ -271,105 +271,25 @@ def patch_prep_script(
 
 
 def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_path: str, skip_submit: bool) -> None:
-    try:
-        import os
-        import pexpect
-    except ImportError as exc:
-        raise RuntimeError(
-            "pexpect is required to launch CASA automatically. Install it with 'pip install pexpect'"
-        ) from exc
-
-    env = os.environ.copy()
-    env['QT_QPA_PLATFORM'] = 'offscreen'
-
-    class _PexpectStdoutLogger:
-        def __init__(self, stream):
-            self.stream = stream
-
-        def write(self, data):
-            if isinstance(data, bytes):
-                data = data.decode("utf-8", errors="replace")
-            self.stream.write(data)
-
-        def flush(self):
-            self.stream.flush()
-
-    command = [casa_executable, "--nogui"]
-    print(f"Spawning CASA executable: {' '.join(command)}")
-    logger = _PexpectStdoutLogger(sys.stdout)
-    if os.name == 'nt':
-        from pexpect import popen_spawn
-        child = popen_spawn.PopenSpawn(
-            command,
-            cwd=workdir,
-            env=env,
-            encoding="utf-8",
-            timeout=30,
-            logfile=logger,
-        )
-    else:
-        child = pexpect.spawn(
-            command[0],
-            args=command[1:],
-            cwd=str(workdir),
-            env=env,
-            encoding="utf-8",
-            timeout=30,
-            logfile=logger,
-        )
-
-    def strip_ansi(text: str) -> str:
-        return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
-
-    prompt_patterns = [r"CASA <\d+>:", r">>> ", r"^> ", r"^[^\n]*\$ "]
-    prompt_found = False
-    accumulated_output = ""
-    for attempt in range(12):
-        try:
-            index = child.expect(prompt_patterns, timeout=10)
-            print(f"Detected CASA prompt (pattern {index})")
-            prompt_found = True
-            break
-        except pexpect.exceptions.TIMEOUT:
-            accumulated_output += child.before
-            if re.search(r"CASA <\d+>:", strip_ansi(accumulated_output)):
-                print("Detected CASA prompt after stripping ANSI escape sequences.")
-                prompt_found = True
-                break
-            print(f"Waiting for CASA prompt... (attempt {attempt + 1}/12)")
-
-    if not prompt_found:
-        raise RuntimeError(
-            "Could not detect CASA prompt after launch. Output:\n" + strip_ansi(accumulated_output)
-        )
-
-    def run_casa_command(command_text: str, description: str) -> bool:
-        print(f"Executing {description} inside CASA: {command_text}")
-        child.sendline(command_text)
-        try:
-            child.expect(prompt_patterns, timeout=1200)
-            print(f"{description} completed and CASA prompt returned.")
-            return True
-        except pexpect.exceptions.TIMEOUT:
-            print(f"Warning: {description} did not return to prompt within timeout.")
-            return False
-
-    prep_command = f"execfile('{prep_script_path}')"
-    if not run_casa_command(prep_command, 'prep script'):
-        child.interact(escape_character=None)
-        return
+    command = [
+        casa_executable,
+        "--nogui",
+        "-c",
+        f"exec(open('{prep_script_path}').read())",
+    ]
+    print(f"Launching CASA non-interactively: {' '.join(command)}")
+    subprocess.run(command, cwd=workdir, check=True)
 
     if skip_submit:
         print("Skipping submit batch execution as requested.")
-        child.interact(escape_character=None)
         return
 
-    submit_command = "execfile('submit_batch_of_batch_jobs.py')"
-    if not run_casa_command(submit_command, 'submit batch script'):
-        child.interact(escape_character=None)
-        return
+    submit_script = workdir / "submit_batch_of_batch_jobs.py"
+    if not submit_script.exists():
+        raise FileNotFoundError(f"Submit script not found at {submit_script}")
 
-    child.interact(escape_character=None)
+    print(f"Submitting batch jobs using {submit_script}")
+    subprocess.run([sys.executable, str(submit_script)], cwd=workdir, check=True)
 
 def main():
     args = parse_args()
@@ -466,7 +386,7 @@ def main():
         print(f"Workdir ready at: {workdir.resolve()}")
 
         if args.run_casa:
-            print("Launching interactive CASA in the workdir and executing the prep script...")
+            print("Launching CASA non-interactively in the workdir and executing the prep script...")
             launch_casa_and_exec_prep(
                 args.casa_executable,
                 workdir,
@@ -474,9 +394,9 @@ def main():
                 args.skip_submit,
             )
         else:
-            print("To launch CASA manually, run:")
+            print("To run CASA manually instead, execute:")
             print(f"  cd {workdir}")
-            print(f"  {args.casa_executable}")
+            print(f"  {args.casa_executable} --nogui -c \"exec(open('{prep_script_path.name}').read())\"")
         return
 
     if not args.url:
@@ -587,7 +507,7 @@ def main():
     print(f"Workdir ready at: {workdir.resolve()}")
 
     if args.run_casa:
-        print("Launching interactive CASA in the workdir and executing the prep script...")
+        print("Launching CASA non-interactively in the workdir and executing the prep script...")
         launch_casa_and_exec_prep(
             args.casa_executable,
             workdir,
@@ -595,9 +515,9 @@ def main():
             args.skip_submit,
         )
     else:
-        print("To launch CASA manually, run:")
+        print("To run CASA manually instead, execute:")
         print(f"  cd {workdir}")
-        print(f"  {args.casa_executable}")
+        print(f"  {args.casa_executable} --nogui -c \"exec(open('{prep_script_path.name}').read())\"")
 
 
 if __name__ == "__main__":

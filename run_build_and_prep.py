@@ -438,7 +438,7 @@ def main():
 
     build_cmd = [
         sys.executable,
-        str(script_dir / "build_dir.py"),
+        str(script_dir / "build_ASC.py"),
         build_project_code,
         build_object,
         args.url,

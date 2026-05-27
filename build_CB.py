@@ -84,6 +84,15 @@ def is_tar_url(url):
     return any(lower.endswith(ext) for ext in ['.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tar.xz'])
 
 
+def safe_remove(path):
+    path = Path(path)
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        print(f"Warning: Could not remove temporary file {path}: {e}")
+
+
 def find_first_observations_dir(url, visited=None):
     if visited is None:
         visited = set()
@@ -258,6 +267,7 @@ def main():
                     tar_copy = temp_dir / input_path.name
                     shutil.copy(str(input_path), str(tar_copy))
                     extract_tar_with_progress(tar_copy, temp_dir)
+                    safe_remove(tar_copy)
                     found = find_observations_subdir_in_path(temp_dir)
                     if not found:
                         sys.exit("Error: No observations* directory found inside extracted tar archive.")
@@ -272,6 +282,7 @@ def main():
                 urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
                 print("\nDownload complete.")
                 extract_tar_with_progress(tar_path, temp_dir)
+                safe_remove(tar_path)
                 found = find_observations_subdir_in_path(temp_dir)
                 if not found:
                     sys.exit("Error: No observations* directory found inside extracted tar archive.")
@@ -295,14 +306,17 @@ def main():
                         print("\nDownloaded remote URL to temporary archive, trying to extract.")
                         if tarfile.is_tarfile(str(archive_path)):
                             extract_tar_with_progress(archive_path, temp_dir)
+                            safe_remove(archive_path)
                             found = find_observations_subdir_in_path(temp_dir)
                             if found:
                                 downloaded_dir = found
                             else:
                                 sys.exit("Error: No observations* subdirectory found in extracted temporary archive.")
                         else:
+                            safe_remove(archive_path)
                             sys.exit("Error: The URL did not return a tar archive and no observations* directory could be discovered.")
                     except Exception as e:
+                        safe_remove(archive_path)
                         sys.exit(f"Error: Failed to download or inspect remote URL: {e}")
 
         if downloaded_dir is None:

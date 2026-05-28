@@ -232,6 +232,7 @@ def main():
     parser.add_argument('url', type=str, help='URL or local path to the tar file or directory')
     parser.add_argument('observation_date', type=str, help='Observation date, e.g. 2023-07-22')
     parser.add_argument('--cb', type=str, default='CB', help='Path to the CB template directory')
+    parser.add_argument('--temp-dir', type=str, default=None, help='Directory to use for temporary downloads and extraction')
     args = parser.parse_args()
 
     workdir_name = f"working.{args.project_code}.{args.object_name}.{args.observation_date}"
@@ -249,7 +250,11 @@ def main():
     downloaded_dir = None
     observation_subdir_name = None
 
-    with tempfile.TemporaryDirectory() as temp_dir_name:
+    temp_root = Path(args.temp_dir).expanduser().resolve() if args.temp_dir else Path.cwd()
+    temp_root.mkdir(parents=True, exist_ok=True)
+    print(f"Using temporary directory root: {temp_root}")
+
+    with tempfile.TemporaryDirectory(dir=str(temp_root), prefix='build_cb_') as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         input_path = Path(args.url)
 

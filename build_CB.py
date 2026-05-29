@@ -8,20 +8,21 @@ import urllib.request
 import urllib.error
 import re
 
-
 def download_progress(blocks, block_size, total_size):
+    """Download progress bar"""
     if total_size <= 0:
         return
     downloaded = blocks * block_size
-    percent = min(downloaded / total_size * 100, 100)
+    percent = min(downloaded / total_size * 100, 100)\
+        
     mb_done = downloaded / (1024 * 1024)
     mb_total = total_size / (1024 * 1024)
+
     print(
         f"\rDownloading: {percent:5.1f}% ({mb_done:6.1f} MB / {mb_total:.1f} MB)",
-        end=' ',
-        flush=True,
+        end='',
+        flush=True
     )
-
 
 def extract_tar_with_progress(tar_path, extract_path):
     with tarfile.open(str(tar_path), "r:*") as tar:
@@ -334,6 +335,7 @@ def main():
             observation_subdir_name = downloaded_dir.name
 
         print(f"Moving contents of downloaded observation directory {downloaded_dir} into {workdir_path}")
+        moved_names = []
         for item in downloaded_dir.iterdir():
             destination = workdir_path / item.name
             if destination.exists():
@@ -342,7 +344,12 @@ def main():
                 else:
                     destination.unlink()
             shutil.move(str(item), str(destination))
-        observation_subdir_name = '.'
+            moved_names.append(item.name)
+
+        if len(moved_names) == 1 and (workdir_path / moved_names[0]).is_dir():
+            observation_subdir_name = moved_names[0]
+        else:
+            observation_subdir_name = '.'
 
     if not cb_template_src.exists():
         sys.exit(f"Error: CB template directory {cb_template_src} does not exist.")

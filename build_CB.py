@@ -214,7 +214,10 @@ def update_casa_import_block(script_path, observation_dir_name):
     pattern = re.compile(
         r"hifv_importdata\s*\(\s*vis\s*=\s*\[\s*['\"]([^'\"]+)['\"]\s*\]\s*\)",
     )
-    replacement = f"hifv_importdata(vis=['{observation_dir_name}'])"
+    if observation_dir_name == '.':
+        replacement = "hifv_importdata(vis=['.'])"
+    else:
+        replacement = f"hifv_importdata(vis=['{observation_dir_name}'])"
     new_text, count = pattern.subn(replacement, text, count=1)
     if count == 0:
         print(f"Warning: Could not find a hifv_importdata(vis=[...]) call to patch in {script_path}.")
@@ -330,15 +333,16 @@ def main():
         if observation_subdir_name is None:
             observation_subdir_name = downloaded_dir.name
 
-        target_downloaded_dir = workdir_path / observation_subdir_name
-        if target_downloaded_dir.exists():
-            if target_downloaded_dir.is_dir():
-                shutil.rmtree(str(target_downloaded_dir))
-            else:
-                target_downloaded_dir.unlink()
-
-        print(f"Moving downloaded observation directory {downloaded_dir} to {target_downloaded_dir}")
-        shutil.move(str(downloaded_dir), str(target_downloaded_dir))
+        print(f"Moving contents of downloaded observation directory {downloaded_dir} into {workdir_path}")
+        for item in downloaded_dir.iterdir():
+            destination = workdir_path / item.name
+            if destination.exists():
+                if destination.is_dir():
+                    shutil.rmtree(str(destination))
+                else:
+                    destination.unlink()
+            shutil.move(str(item), str(destination))
+        observation_subdir_name = '.'
 
     if not cb_template_src.exists():
         sys.exit(f"Error: CB template directory {cb_template_src} does not exist.")

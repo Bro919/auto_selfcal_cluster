@@ -1,7 +1,6 @@
 import argparse
 import json
 import re
-import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -9,12 +8,10 @@ import xml.etree.ElementTree as ET
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Extract project code, object name, and observation date from either a CASA MS or an extracted SDM-BDF."
+        description="Extract project code, object name, and observation date from an extracted SDM-BDF root."
     )
-    parser.add_argument("mspath", help="Path to the measurement set directory or extracted SDM-BDF root")
-    parser.add_argument("--field", type=int, default=2, help="Field index to use for the target name when reading an MS")
-    parser.add_argument("--project-code", default=None, help="Project code override when it cannot be inferred from the input data")
-    parser.add_argument("--rename", action="store_true", help="Rename the MS into the cleaned directory/name layout")
+    parser.add_argument("mspath", help="Path to the extracted SDM-BDF root")
+    parser.add_argument("--project-code", default=None, help="Project code override when it cannot be inferred from the SDM content")
     parser.add_argument(
         "--output-format",
         choices=["plain", "json"],
@@ -22,16 +19,6 @@ def parse_args():
         help="Output format for the extracted metadata",
     )
     return parser.parse_args()
-
-
-def is_ms_dir(path):
-    path = Path(path)
-    if not path.is_dir():
-        return False
-    if path.suffix == ".ms":
-        return True
-    folder_names = {child.name.upper() for child in path.iterdir() if child.is_dir()}
-    return bool(folder_names & {"FIELD", "MAIN", "ANTENNA", "SOURCE", "SPECTRAL_WINDOW", "OBSERVATION"})
 
 
 def normalize_date_token(token):
@@ -101,21 +88,6 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
                     break
 
     return project_code, target_candidate, date_candidate
-
-
-def extract_ms_metadata(ms_path, field_index=2, project_code_override=None):
-    ms_path = Path(ms_path)
-    if not ms_path.exists():
-        raise FileNotFoundError(f"Measurement set path not found: {ms_path}")
-    if not is_ms_dir(ms_path):
-        raise RuntimeError(f"Path is not a recognized measurement set directory: {ms_path}")
-
-    project_code = project_code_override or infer_metadata_from_path(ms_path)[0]
-    raise RuntimeError(
-        "MS metadata extraction is not supported by this script. "
-        "Provide an extracted SDM-BDF root instead, or use --project-code if you are passing an MS path."
-        + (f" Inferred project code: {project_code}" if project_code else "")
-    )
 
 
 def parse_asdm_time(value):
@@ -303,64 +275,14 @@ def extract_sdm_bdf_metadata(root, project_code_override=None):
     return project_code, object_name, observation_date
 
 
-def extract_ms_metadata(ms_path, field_index=2, project_code_override=None):
-    ms_path = Path(ms_path)
-    if not ms_path.exists():
-        raise FileNotFoundError(f"Measurement set path not found: {ms_path}")
-
-    renamed = parse_renamed_mspath(ms_path)
-    if renamed:
-        project_code, target, obs_date = renamed
-        return project_code, target, obs_date
-
-    project_code = project_code_override
-
-    result = extract_from_casacore(ms_path, field_index)
-    if result is not None:
-        target, obs_date = result
-        if project_code is None:
-            project_code = infer_metadata_from_path(ms_path, project_code_override)[0]
-        if project_code is None:
-            raise RuntimeError(
-                "Project code could not be inferred from the MS path. "
-                "Provide --project-code or use a renamed MS path."
-            )
-        return project_code, target, obs_date
-
-    path_project, path_target, path_date = infer_metadata_from_path(ms_path, project_code_override)
-    if path_project and path_target and path_date:
-        return path_project, path_target, path_date
-
-    raise RuntimeError(
-        "Could not extract target and observation date from the measurement set. "
-        "Install casacore/astropy or provide an MS path already renamed in the expected form."
-    )
-
-
-def extract_metadata(path, field_index=2, project_code_override=None):
-    if is_ms_dir(path):
-        return extract_ms_metadata(path, field_index=field_index, project_code_override=project_code_override)
-    return extract_sdm_bdf_metadata(path, project_code_override=project_code_override)
-
-
-def build_new_mspath(ms_path, project_code, target, obs_date):
-    ms_path = Path(ms_path)
-    parent_dir = ms_path.parent
-    return parent_dir / f"{project_code}.{target}.{obs_date}.ms"
-
-
-def rename_ms(ms_path, new_mspath):
-    if new_mspath.exists():
-        raise FileExistsError(f"Target path already exists: {new_mspath}")
-    shutil.move(str(ms_path), str(new_mspath))
-    return new_mspath
+def extract_metadata(root, project_code_override=None):
+    return extract_sdm_bdf_metadata(root, project_code_override=project_code_override)
 
 
 def main():
     args = parse_args()
     project_code, target, obs_date = extract_metadata(
         args.mspath,
-        field_index=args.field,
         project_code_override=args.project_code,
     )
 
@@ -370,19 +292,12 @@ def main():
         "observation_date": obs_date,
     }
 
-    if args.rename and is_ms_dir(args.mspath):
-        new_mspath = build_new_mspath(args.mspath, project_code, target, obs_date)
-        rename_ms(args.mspath, new_mspath)
-        output["renamed_path"] = str(new_mspath)
-
     if args.output_format == "json":
         print(json.dumps(output))
     else:
         print(project_code)
         print(target)
         print(obs_date)
-        if args.rename and output.get("renamed_path"):
-            print(str(output["renamed_path"]))
 
 
 if __name__ == "__main__":

@@ -62,14 +62,20 @@ for i in range(len(frequencies)):
     final_files = [p for p in source_dir.rglob("*") if final_string in p.name]
 
     print(f"Moving {len(final_files)} final files to {destin_dir}") 
+    def copy_tree_compat(src, dst):
+        if dst.exists():
+            if dst.is_file():
+                dst.unlink()
+            else:
+                shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+
     for ff in final_files:
         destination = destin_dir / ff.name
         if ff.is_file():
             shutil.copy2(ff, destination)
         elif ff.is_dir():
-            if destination.exists():
-                shutil.rmtree(destination)
-            shutil.copytree(ff, destination)
+            copy_tree_compat(ff, destination)
     print("Done")
 
     # apply calibrations to each measurement set

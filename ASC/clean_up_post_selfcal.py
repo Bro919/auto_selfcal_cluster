@@ -67,7 +67,9 @@ for i in range(len(frequencies)):
         if ff.is_file():
             shutil.copy2(ff, destination)
         elif ff.is_dir():
-            shutil.copytree(ff, destination, dirs_exist_ok=True) 
+            if destination.exists():
+                shutil.rmtree(destination)
+            shutil.copytree(ff, destination)
     print("Done")
 
     # apply calibrations to each measurement set

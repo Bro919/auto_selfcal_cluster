@@ -1,3 +1,4 @@
+import argparse
 import shutil
 import os
 from pathlib import Path
@@ -17,12 +18,52 @@ def get_frequencies_from_dirs(root_dir):
                 freq_list.append(float(match.group(1)))
     return sorted(freq_list)
 
-# user options
-root_dir = "/lustre/aoc/observers/nm-15783/projectname.objectname"
-prefix_string = "23A-241.ASASSN-14ae.2023-09-17"
-final_images_only = True   # toggle False if you also want the model, residual, etc. that tclean gives 
-apply_calibrations = False  # will apply calibrations to each split measurement set
-concat_final_ms = False     # will concat all split measurement sets into one _final.ms with calibrations applied (not clear if this actually produces a good self-cal ms)
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Collect final files from frequency folders into a final_files directory."
+    )
+    parser.add_argument(
+        "root_dir",
+        nargs="?",
+        default=None,
+        help="Root observation directory containing <freq>GHz folders. Defaults to current working directory.",
+    )
+    parser.add_argument(
+        "--prefix",
+        default="",
+        help="Prefix string used only if applying calibrations or concatenating final measurement sets.",
+    )
+    parser.add_argument(
+        "--all-final-products",
+        action="store_true",
+        help="Copy all final products instead of only the final tt0 image.",
+    )
+    parser.add_argument(
+        "--apply-calibrations",
+        action="store_true",
+        help="Apply calibrations to each split measurement set.",
+    )
+    parser.add_argument(
+        "--concat-final-ms",
+        action="store_true",
+        help="Concat all split measurement sets into one final measurement set.",
+    )
+    return parser.parse_args()
+
+
+args = parse_args()
+root_dir = Path(args.root_dir or os.getcwd())
+prefix_string = args.prefix
+final_images_only = not args.all_final_products
+apply_calibrations = args.apply_calibrations
+concat_final_ms = args.concat_final_ms
+
+if not root_dir.is_dir():
+    raise FileNotFoundError(
+        f"root_dir does not exist: {root_dir}.\n"
+        "Please run the script from the observation root or pass the correct path."
+    )
 
 if not os.path.isdir(root_dir):
     raise FileNotFoundError(

@@ -24,6 +24,12 @@ final_images_only = True   # toggle False if you also want the model, residual, 
 apply_calibrations = False  # will apply calibrations to each split measurement set
 concat_final_ms = False     # will concat all split measurement sets into one _final.ms with calibrations applied (not clear if this actually produces a good self-cal ms)
 
+if not os.path.isdir(root_dir):
+    raise FileNotFoundError(
+        f"root_dir does not exist: {root_dir}.\n"
+        "Please set `root_dir` to the correct observation directory before running the script."
+    )
+
 # for an SED
 #frequencies = [1.26, 1.52, 1.75,
 #               2.5, 3.0, 3.5,

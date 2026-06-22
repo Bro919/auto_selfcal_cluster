@@ -116,7 +116,7 @@ def scrape_local_metadata(input_path: Path, project_code: Optional[str] = None) 
     script_dir = Path(__file__).resolve().parent
     command = [
         sys.executable,
-        str(script_dir / "metadata-scrapper.py"),
+        str(script_dir / "metadata-scrapper-CB.py"),
         str(input_path),
         "--output-format",
         "json",
@@ -129,11 +129,11 @@ def scrape_local_metadata(input_path: Path, project_code: Optional[str] = None) 
     stdout_text = stdout.decode("utf-8", errors="replace")
     stderr_text = stderr.decode("utf-8", errors="replace")
     if result.returncode != 0:
-        raise RuntimeError(stderr_text.strip() or f"metadata-scrapper failed with code {result.returncode}")
+        raise RuntimeError(stderr_text.strip() or f"metadata-scrapper-CB failed with code {result.returncode}")
     try:
         return json.loads(stdout_text)
     except ValueError as exc:
-        raise RuntimeError(f"Could not parse metadata-scrapper output: {exc}\nOutput:\n{stdout_text}") from exc
+        raise RuntimeError(f"Could not parse metadata-scrapper-CB output: {exc}\nOutput:\n{stdout_text}") from exc
 
 
 def prepare_workdir_from_local_input(
@@ -476,7 +476,7 @@ def main():
 
         ms_command = [
             sys.executable,
-            str(script_dir / "metadata-scrapper.py"),
+            str(script_dir / "metadata-scrapper-CB.py"),
             str(ms_path),
             "--output-format",
             "json",
@@ -493,7 +493,7 @@ def main():
         try:
             ms_metadata = json.loads(stdout_text)
         except ValueError as exc:
-            sys.exit(f"Error parsing metadata from metadata-scrapper.py: {exc}\nOutput:\n{stdout_text}")
+            sys.exit(f"Error parsing metadata from metadata-scrapper-CB.py: {exc}\nOutput:\n{stdout_text}")
         args.project_code = args.project_code or ms_metadata["project_code"]
         args.object_name = args.object_name or ms_metadata["object_name"]
         args.observation_date = args.observation_date or ms_metadata["observation_date"]

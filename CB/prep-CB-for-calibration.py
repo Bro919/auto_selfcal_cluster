@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 
 # CB prep script configuration ============================================================
-WORKDIRS = ["."]
-CASA_EXECUTABLE = "casa"
+WORKDIR = "."
+CASA_EXECUTABLE = "casa-pipe"
 CASA_SCRIPT = "casa_pipescript_666.py"
 JOB_SCRIPT_NAME = "run_casa_pipescript.sh"
 BATCH_LIST_FILE = "batch_files_list.txt"
@@ -106,57 +106,52 @@ def write_batch_list(batch_file, paths, append=False):
             handle.write(script_path + "\n")
 
 
-# generate SBATCH job scripts for each CB workdir =========================================
-batch_paths = []
+# generate SBATCH job script for the single CB workdir ====================================
+workdir = Path(WORKDIR).expanduser().resolve()
+if not workdir.exists() or not workdir.is_dir():
+    print(f"Error: workdir does not exist or is not a directory: {workdir}", file=sys.stderr)
+    sys.exit(1)
 
-for workdir_name in WORKDIRS:
-    workdir = Path(workdir_name).expanduser().resolve()
-    if not workdir.exists() or not workdir.is_dir():
-        print(f"Error: workdir does not exist or is not a directory: {workdir}", file=sys.stderr)
-        continue
+casa_script_path = workdir / CASA_SCRIPT
+if not casa_script_path.exists():
+    print(f"Error: CASA pipescript not found in {workdir}: {CASA_SCRIPT}", file=sys.stderr)
+    sys.exit(1)
 
-    casa_script_path = workdir / CASA_SCRIPT
-    if not casa_script_path.exists():
-        print(f"Error: CASA pipescript not found in {workdir}: {CASA_SCRIPT}", file=sys.stderr)
-        continue
+job_name = f"casa-{workdir.name}"
+output = f"{job_name}.out"
+error = f"{job_name}.err"
+job_script_path = workdir / JOB_SCRIPT_NAME
 
-    job_name = f"casa-{workdir.name}"
-    output = f"{job_name}.out"
-    error = f"{job_name}.err"
-    job_script_path = workdir / JOB_SCRIPT_NAME
+script_content = build_slurm_script(
+    workdir=workdir,
+    job_name=job_name,
+    output=output,
+    error=error,
+    time_limit=SBATCH_TIME,
+    mem=SBATCH_MEM,
+    nodes=SBATCH_NODES,
+    ntasks_per_node=SBATCH_NTASKS_PER_NODE,
+    cpus_per_task=SBATCH_CPUS_PER_TASK,
+    partition=SBATCH_PARTITION,
+    account=SBATCH_ACCOUNT,
+    mail_type=SBATCH_MAIL_TYPE,
+    mail_user=SBATCH_MAIL_USER,
+    export_all=SBATCH_EXPORT_ALL,
+    module_load=MODULE_LOAD,
+    casa_executable=CASA_EXECUTABLE,
+    casa_script=CASA_SCRIPT,
+    use_execfile=USE_EXECFILE,
+)
 
-    script_content = build_slurm_script(
-        workdir=workdir,
-        job_name=job_name,
-        output=output,
-        error=error,
-        time_limit=SBATCH_TIME,
-        mem=SBATCH_MEM,
-        nodes=SBATCH_NODES,
-        ntasks_per_node=SBATCH_NTASKS_PER_NODE,
-        cpus_per_task=SBATCH_CPUS_PER_TASK,
-        partition=SBATCH_PARTITION,
-        account=SBATCH_ACCOUNT,
-        mail_type=SBATCH_MAIL_TYPE,
-        mail_user=SBATCH_MAIL_USER,
-        export_all=SBATCH_EXPORT_ALL,
-        module_load=MODULE_LOAD,
-        casa_executable=CASA_EXECUTABLE,
-        casa_script=CASA_SCRIPT,
-        use_execfile=USE_EXECFILE,
-    )
+if DRY_RUN:
+    print(f"# Generated SBATCH script for {workdir}")
+    print(script_content)
+    sys.exit(0)
 
-    if DRY_RUN:
-        print(f"# Generated SBATCH script for {workdir}")
-        print(script_content)
-        continue
+job_script_path.write_text(script_content, encoding="utf-8")
+job_script_path.chmod(0o755)
+print(f"Created SLURM job script: {job_script_path}")
 
-    job_script_path.write_text(script_content, encoding="utf-8")
-    job_script_path.chmod(0o755)
-    print(f"Created SLURM job script: {job_script_path}")
-    batch_paths.append(str(job_script_path.resolve()))
-
-if batch_paths and not DRY_RUN:
-    write_batch_list(BATCH_LIST_FILE, batch_paths, append=APPEND_BATCH_LIST)
-    action = "Appended" if APPEND_BATCH_LIST else "Wrote"
-    print(f"{action} {len(batch_paths)} script path(s) to {Path(BATCH_LIST_FILE).expanduser().resolve()}")
+write_batch_list(BATCH_LIST_FILE, [str(job_script_path.resolve())], append=APPEND_BATCH_LIST)
+action = "Appended" if APPEND_BATCH_LIST else "Wrote"
+print(f"{action} 1 script path to {Path(BATCH_LIST_FILE).expanduser().resolve()}")

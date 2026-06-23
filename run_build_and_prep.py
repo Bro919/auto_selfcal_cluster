@@ -43,7 +43,7 @@ def parse_args():
 
     parser.add_argument(
         "--run-casa",
-        action="store_true",
+        action="store_false",
         help="Launch CASA non-interactively after building the workdir, execute the prep script, and optionally submit batch jobs",
     )
     parser.add_argument(

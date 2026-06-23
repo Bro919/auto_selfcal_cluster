@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+
+import os
+import shlex
+import sys
+from pathlib import Path
+
+# CB prep script configuration ============================================================
+WORKDIRS = ["."]
+CASA_EXECUTABLE = "casa"
+CASA_SCRIPT = "casa_pipescript_666.py"
+JOB_SCRIPT_NAME = "run_casa_pipescript.sh"
+BATCH_LIST_FILE = "batch_files_list.txt"
+DRY_RUN = False
+APPEND_BATCH_LIST = False
+
+SBATCH_TIME = "7-00:00:00"
+SBATCH_MEM = "64GB"
+SBATCH_NODES = 1
+SBATCH_NTASKS_PER_NODE = 1
+SBATCH_CPUS_PER_TASK = 1
+SBATCH_PARTITION = ""
+SBATCH_ACCOUNT = None
+SBATCH_MAIL_TYPE = None
+SBATCH_MAIL_USER = None
+SBATCH_EXPORT_ALL = True
+MODULE_LOAD = None
+USE_EXECFILE = False
+
+
+def build_slurm_script(
+    workdir,
+    job_name,
+    output,
+    error,
+    time_limit,
+    mem,
+    nodes,
+    ntasks_per_node,
+    cpus_per_task,
+    partition,
+    account,
+    mail_type,
+    mail_user,
+    export_all,
+    module_load,
+    casa_executable,
+    casa_script,
+    use_execfile,
+):
+    workdir_abs = workdir.resolve()
+    header_lines = ["#!/bin/bash", ""]
+
+    if export_all:
+        header_lines.append("#SBATCH --export=ALL")
+    if account:
+        header_lines.append(f"#SBATCH --account={account}")
+    if partition:
+        header_lines.append(f"#SBATCH --partition={partition}")
+
+    header_lines.extend(
+        [
+            f"#SBATCH --job-name={job_name}",
+            f"#SBATCH --output={output}",
+            f"#SBATCH --error={error}",
+            f"#SBATCH --chdir={shlex.quote(str(workdir_abs))}",
+            f"#SBATCH --time={time_limit}",
+            f"#SBATCH --mem={mem}",
+            f"#SBATCH --nodes={nodes}",
+            f"#SBATCH --ntasks-per-node={ntasks_per_node}",
+            f"#SBATCH --cpus-per-task={cpus_per_task}",
+        ]
+    )
+
+    if mail_type:
+        header_lines.append(f"#SBATCH --mail-type={mail_type}")
+    if mail_user:
+        header_lines.append(f"#SBATCH --mail-user={mail_user}")
+
+    body_lines = ["", "set -euo pipefail", "", "echo \"Starting CASA non-interactive job\"", ""]
+
+    if module_load:
+        body_lines.extend([f"echo \"Loading module: {module_load}\"", f"module load {module_load}", ""])
+
+    quoted_casa = shlex.quote(casa_executable)
+    quoted_casa_script = shlex.quote(casa_script)
+    if use_execfile:
+        casa_command = f"{quoted_casa} --nogui -c \"execfile({quoted_casa_script})\""
+    else:
+        casa_command = f"{quoted_casa} --nogui -c \"exec(open({quoted_casa_script}).read())\""
+
+    body_lines.append(f"echo \"Running: {casa_command}\"")
+    body_lines.append(casa_command)
+    body_lines.append("")
+    body_lines.append("echo \"CASA job complete\"")
+
+    return "\n".join(header_lines + body_lines) + "\n"
+
+
+def write_batch_list(batch_file, paths, append=False):
+    mode = "a" if append else "w"
+    batch_path = Path(batch_file).expanduser().resolve()
+    batch_path.parent.mkdir(parents=True, exist_ok=True)
+    with batch_path.open(mode, encoding="utf-8") as handle:
+        for script_path in paths:
+            handle.write(script_path + "\n")
+
+
+# generate SBATCH job scripts for each CB workdir =========================================
+batch_paths = []
+
+for workdir_name in WORKDIRS:
+    workdir = Path(workdir_name).expanduser().resolve()
+    if not workdir.exists() or not workdir.is_dir():
+        print(f"Error: workdir does not exist or is not a directory: {workdir}", file=sys.stderr)
+        continue
+
+    casa_script_path = workdir / CASA_SCRIPT
+    if not casa_script_path.exists():
+        print(f"Error: CASA pipescript not found in {workdir}: {CASA_SCRIPT}", file=sys.stderr)
+        continue
+
+    job_name = f"casa-{workdir.name}"
+    output = f"{job_name}.out"
+    error = f"{job_name}.err"
+    job_script_path = workdir / JOB_SCRIPT_NAME
+
+    script_content = build_slurm_script(
+        workdir=workdir,
+        job_name=job_name,
+        output=output,
+        error=error,
+        time_limit=SBATCH_TIME,
+        mem=SBATCH_MEM,
+        nodes=SBATCH_NODES,
+        ntasks_per_node=SBATCH_NTASKS_PER_NODE,
+        cpus_per_task=SBATCH_CPUS_PER_TASK,
+        partition=SBATCH_PARTITION,
+        account=SBATCH_ACCOUNT,
+        mail_type=SBATCH_MAIL_TYPE,
+        mail_user=SBATCH_MAIL_USER,
+        export_all=SBATCH_EXPORT_ALL,
+        module_load=MODULE_LOAD,
+        casa_executable=CASA_EXECUTABLE,
+        casa_script=CASA_SCRIPT,
+        use_execfile=USE_EXECFILE,
+    )
+
+    if DRY_RUN:
+        print(f"# Generated SBATCH script for {workdir}")
+        print(script_content)
+        continue
+
+    job_script_path.write_text(script_content, encoding="utf-8")
+    job_script_path.chmod(0o755)
+    print(f"Created SLURM job script: {job_script_path}")
+    batch_paths.append(str(job_script_path.resolve()))
+
+if batch_paths and not DRY_RUN:
+    write_batch_list(BATCH_LIST_FILE, batch_paths, append=APPEND_BATCH_LIST)
+    action = "Appended" if APPEND_BATCH_LIST else "Wrote"
+    print(f"{action} {len(batch_paths)} script path(s) to {Path(BATCH_LIST_FILE).expanduser().resolve()}")

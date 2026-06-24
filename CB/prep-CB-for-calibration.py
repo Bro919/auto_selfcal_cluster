@@ -5,7 +5,7 @@ import shlex
 import sys
 from pathlib import Path
 
-# CB prep script configuration ============================================================
+# CB prep script configuration
 WORKDIR = "."
 CASA_EXECUTABLE = "casa-pipe"
 CASA_SCRIPT = "casa_pipescript_666.py"
@@ -106,7 +106,7 @@ def write_batch_list(batch_file, paths, append=False):
             handle.write(script_path + "\n")
 
 
-# generate SBATCH job script for the single CB workdir ====================================
+# generate SBATCH job script for the single CB workdir
 workdir = Path(WORKDIR).expanduser().resolve()
 if not workdir.exists() or not workdir.is_dir():
     print(f"Error: workdir does not exist or is not a directory: {workdir}", file=sys.stderr)

@@ -119,7 +119,7 @@ if not casa_script_path.exists():
     print(f"Error: CASA pipescript not found in {workdir}: {CASA_SCRIPT}", file=sys.stderr)
     sys.exit(1)
 
-job_name = f"casa-{workdir.name}"
+job_name = f"CalibrationPipeline-{workdir.name}"
 output = f"{job_name}.out"
 error = f"{job_name}.err"
 job_script_path = workdir / JOB_SCRIPT_NAME

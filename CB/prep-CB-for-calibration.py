@@ -83,13 +83,15 @@ def build_slurm_script(
         body_lines.extend([f"echo \"Loading module: {module_load}\"", f"module load {module_load}", ""])
 
     quoted_casa = shlex.quote(casa_executable)
-    quoted_casa_script = shlex.quote(casa_script)
     if use_execfile:
-        casa_command = f"{quoted_casa} --nogui -c \"execfile({quoted_casa_script})\""
+        python_code = f"execfile({repr(casa_script)})"
     else:
-        casa_command = f"{quoted_casa} --nogui -c \"exec(open({quoted_casa_script}).read())\""
+        python_code = f"exec(open({repr(casa_script)}).read())"
 
-    body_lines.append(f"echo \"Running: {casa_command}\"")
+    casa_command = f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
+    safe_casa_command = casa_command.replace("'", "'\"'\"'")
+
+    body_lines.append(f"echo 'Running: {safe_casa_command}'")
     body_lines.append(casa_command)
     body_lines.append("")
     body_lines.append("echo \"CASA job complete\"")

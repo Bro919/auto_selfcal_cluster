@@ -57,7 +57,6 @@ def scrape_listfile(listfile, source_name):
             time_line = line
             time_indx = i
     
-    # FIELD ===============================================
     nfields = int(field_line.split(" ")[-1][0])
     ls = [lines[field_indx+1+i] for i in range(nfields+1)]
     field = None
@@ -69,7 +68,6 @@ def scrape_listfile(listfile, source_name):
             ra = l.split()[3]
             dec = l.split()[4]
     
-    # CONFIGURATION =======================================
     # find start and finish time for observations
     t0 = time_line.split()[2]
     t1 = time_line.split()[4]
@@ -115,12 +113,10 @@ def scrape_listfile(listfile, source_name):
             "Check the schedule file or adjust the observation date in the prep script."
         )
 
-    # CELL SIZE ==============================================
     #central_freq = (df_resolution[df_resolution["band"] == band]["central_freq"].values[0]).item()
     #synthesized_beamwidth = df_resolution[df_resolution["band"] == band][configuration].values[0].item()
     #cell_size = synthesized_beamwidth/4
     
-    # SPECTRAL WINDOWS =================================================
     # determine how many spectral windows there are
     nspws = int(spw_line.split(' ')[3].split('(')[-1])
     ls = [lines[spw_indx+1+i] for i in range(nspws+1)]

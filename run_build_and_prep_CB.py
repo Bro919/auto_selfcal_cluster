@@ -85,7 +85,7 @@ def run_prep(script_dir: Path, workdir: Path, args: argparse.Namespace) -> None:
     if not prep_script.exists():
         raise FileNotFoundError(f"Could not find prep script at {prep_script}")
 
-    prep_cmd = [sys.executable, str(prep_script)]
+    prep_cmd = [sys.executable, str(prep_script.resolve())]
     print("Running CB prep script to generate SLURM scripts:")
     print(" ".join(prep_cmd))
     if args.dry_run:
@@ -99,7 +99,7 @@ def run_submit(workdir: Path, args: argparse.Namespace) -> None:
     if not submit_script.exists():
         raise FileNotFoundError(f"Could not find submit script at {submit_script}")
 
-    submit_cmd = [sys.executable, str(submit_script)]
+    submit_cmd = [sys.executable, str(submit_script.resolve())]
     if args.submit_dry_run:
         submit_cmd.append("--dry-run")
     if args.submit_sleep_seconds is not None:

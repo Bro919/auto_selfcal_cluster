@@ -23,12 +23,12 @@ def parse_args():
     parser.add_argument("--url", help="URL to download from")
     parser.add_argument(
         "--ms-path",
-        help="Path to a local measurement set directory or extracted SDM-BDF root for metadata extraction and local workdir creation",
+        help="Path to a local measurement set directory, extracted SDM-BDF root, or a CB-style working directory for metadata extraction and local workdir creation",
     )
     parser.add_argument(
         "--use-ms-metadata",
         action="store_true",
-        help="When object_name or observation_date are missing, extract them from the downloaded .ms or local MS path instead of failing.",
+        help="When metadata values are missing, extract them from the downloaded .ms or local MS path using the ASC metadata scraper.",
     )
     parser.add_argument("--asc", default="ASC", help="ASC template directory or path (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Enable A_config in the prep script")
@@ -112,11 +112,27 @@ def resolve_local_measurement_set(input_path: Path) -> Path:
     return None
 
 
+def resolve_metadata_scraper(script_dir: Path) -> Path:
+    candidates = [
+        script_dir / "meatadata-scrapper-ASC.py",
+        script_dir / "metadata-scrapper-ASC.py",
+        script_dir / "metadata-scrapper-CB.py",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(
+        "Could not find an ASC metadata scraper script. Expected one of: "
+        + ", ".join(path.name for path in candidates)
+    )
+
+
 def scrape_local_metadata(input_path: Path, project_code: Optional[str] = None) -> dict:
     script_dir = Path(__file__).resolve().parent
+    metadata_script = resolve_metadata_scraper(script_dir)
     command = [
         sys.executable,
-        str(script_dir / "metadata-scrapper-CB.py"),
+        str(metadata_script),
         str(input_path),
         "--output-format",
         "json",
@@ -129,11 +145,11 @@ def scrape_local_metadata(input_path: Path, project_code: Optional[str] = None) 
     stdout_text = stdout.decode("utf-8", errors="replace")
     stderr_text = stderr.decode("utf-8", errors="replace")
     if result.returncode != 0:
-        raise RuntimeError(stderr_text.strip() or f"metadata-scrapper-CB failed with code {result.returncode}")
+        raise RuntimeError(stderr_text.strip() or f"{metadata_script.name} failed with code {result.returncode}")
     try:
         return json.loads(stdout_text)
     except ValueError as exc:
-        raise RuntimeError(f"Could not parse metadata-scrapper-CB output: {exc}\nOutput:\n{stdout_text}") from exc
+        raise RuntimeError(f"Could not parse {metadata_script.name} output: {exc}\nOutput:\n{stdout_text}") from exc
 
 
 def prepare_workdir_from_local_input(
@@ -344,16 +360,7 @@ def main():
         if args.url:
             print("Warning: --ms-path provided; ignoring --url and using local input instead.")
 
-        if args.use_ms_metadata:
-            try:
-                metadata = scrape_local_metadata(ms_input, args.project_code)
-            except RuntimeError as exc:
-                sys.exit(f"Error extracting metadata from local input: {exc}")
-            args.project_code = args.project_code or metadata.get("project_code")
-            args.object_name = args.object_name or metadata.get("object_name")
-            args.observation_date = args.observation_date or metadata.get("observation_date")
-
-        missing = [
+        metadata_missing = [
             name
             for name, value in [
                 ("project_code", args.project_code),
@@ -362,10 +369,28 @@ def main():
             ]
             if not value
         ]
-        if missing:
+        if args.use_ms_metadata or metadata_missing:
+            try:
+                metadata = scrape_local_metadata(ms_input, args.project_code)
+            except RuntimeError as exc:
+                sys.exit(f"Error extracting metadata from local input: {exc}")
+            args.project_code = args.project_code or metadata.get("project_code")
+            args.object_name = args.object_name or metadata.get("object_name")
+            args.observation_date = args.observation_date or metadata.get("observation_date")
+            metadata_missing = [
+                name
+                for name, value in [
+                    ("project_code", args.project_code),
+                    ("object_name", args.object_name),
+                    ("observation_date", args.observation_date),
+                ]
+                if not value
+            ]
+
+        if metadata_missing:
             sys.exit(
                 "Missing metadata: {}. Provide these manually or supply an input path with enough metadata."
-                .format(", ".join(missing))
+                .format(", ".join(metadata_missing))
             )
 
         build_project_code = args.project_code
@@ -462,21 +487,19 @@ def main():
     if ms_path is None:
         sys.exit(f"Error: No .ms directory found in workdir {workdir}")
 
-    if not args.object_name or not args.observation_date:
-        if not args.use_ms_metadata:
-            missing = []
-            if not args.object_name:
-                missing.append("object_name")
-            if not args.observation_date:
-                missing.append("observation_date")
-            sys.exit(
-                "Missing metadata: {}. Provide these manually or rerun with --use-ms-metadata to extract them from the downloaded .ms."
-                .format(", ".join(missing))
-            )
-
+    metadata_missing = [
+        name
+        for name, value in [
+            ("project_code", args.project_code),
+            ("object_name", args.object_name),
+            ("observation_date", args.observation_date),
+        ]
+        if not value
+    ]
+    if args.use_ms_metadata or metadata_missing:
         ms_command = [
             sys.executable,
-            str(script_dir / "metadata-scrapper-CB.py"),
+            str(resolve_metadata_scraper(script_dir)),
             str(ms_path),
             "--output-format",
             "json",
@@ -493,17 +516,33 @@ def main():
         try:
             ms_metadata = json.loads(stdout_text)
         except ValueError as exc:
-            sys.exit(f"Error parsing metadata from metadata-scrapper-CB.py: {exc}\nOutput:\n{stdout_text}")
+            sys.exit(f"Error parsing metadata from {resolve_metadata_scraper(script_dir).name}: {exc}\nOutput:\n{stdout_text}")
         args.project_code = args.project_code or ms_metadata["project_code"]
         args.object_name = args.object_name or ms_metadata["object_name"]
         args.observation_date = args.observation_date or ms_metadata["observation_date"]
+        metadata_missing = [
+            name
+            for name, value in [
+                ("project_code", args.project_code),
+                ("object_name", args.object_name),
+                ("observation_date", args.observation_date),
+            ]
+            if not value
+        ]
 
-        workdir, ms_path = rename_workdir_and_measurement_set(
-            workdir,
-            args.project_code,
-            args.object_name,
-            args.observation_date,
-            ms_path,
+        if not metadata_missing:
+            workdir, ms_path = rename_workdir_and_measurement_set(
+                workdir,
+                args.project_code,
+                args.object_name,
+                args.observation_date,
+                ms_path,
+            )
+
+    if metadata_missing:
+        sys.exit(
+            "Missing metadata: {}. Provide these manually or supply an input path with enough metadata."
+            .format(", ".join(metadata_missing))
         )
 
     if args.object_name and args.observation_date:

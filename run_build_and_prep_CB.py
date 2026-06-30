@@ -184,9 +184,15 @@ def infer_metadata_from_remote_url(url: str) -> dict:
                     remote_metadata_dir.mkdir(parents=True, exist_ok=True)
                     download_remote_files(observation_dir_url, remote_metadata_dir, extensions={".xml"})
                     metadata = run_metadata_scraper(Path(__file__).resolve().parent, remote_metadata_dir, project_code_override=project_code)
-                    project_code = project_code or metadata.get("project_code")
-                    object_name = metadata.get("object_name") or object_name
-                    observation_date = observation_date or metadata.get("observation_date")
+                    metadata_project_code = metadata.get("project_code")
+                    metadata_object_name = metadata.get("object_name")
+                    metadata_observation_date = metadata.get("observation_date")
+                    if not project_code and metadata_project_code and metadata_project_code != "unknown":
+                        project_code = metadata_project_code
+                    if metadata_object_name and metadata_object_name != "unknown":
+                        object_name = metadata_object_name
+                    if not observation_date and metadata_observation_date and metadata_observation_date != "unknown":
+                        observation_date = metadata_observation_date
             except Exception as exc:
                 print(f"Warning: Remote metadata extraction failed: {exc}")
             finally:
@@ -226,10 +232,7 @@ def infer_metadata_from_remote_url(url: str) -> dict:
                 break
 
     if object_name is None:
-        if path_parts:
-            object_name = path_parts[-1]
-        else:
-            object_name = "unknown"
+        object_name = "unknown"
 
     return {
         "project_code": project_code or "unknown",
@@ -261,7 +264,14 @@ def run_metadata_scraper(script_dir: Path, source_path: Path, project_code_overr
     print(f"Inferring CB metadata from {selected_script.name}:")
     print(" ".join(metadata_cmd))
 
-    result = subprocess.run(metadata_cmd, cwd=script_dir, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        metadata_cmd,
+        cwd=script_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+    )
     if result.returncode != 0:
         stderr = result.stderr.strip()
         raise RuntimeError(stderr or f"{selected_script.name} failed with code {result.returncode}")
@@ -368,6 +378,13 @@ def main() -> None:
         project_code = project_code or metadata.get("project_code")
         object_name = object_name or metadata.get("object_name")
         observation_date = observation_date or metadata.get("observation_date")
+
+    if project_code == "unknown":
+        project_code = None
+    if object_name == "unknown":
+        object_name = None
+    if observation_date == "unknown":
+        observation_date = None
 
     if not project_code or not object_name or not observation_date or not url:
         raise ValueError(

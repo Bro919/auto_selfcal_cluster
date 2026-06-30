@@ -20,7 +20,7 @@ def parse_args():
         help=(
             "Optional positional values. Provide four values as "
             "project_code object_name url observation_date, or provide a single "
-            "source path/URL to let metadata-scrapper-CB.py infer the metadata."
+            "source path/URL to let metadata-scraper-CB.py infer the metadata."
         ),
     )
     parser.add_argument(
@@ -81,9 +81,16 @@ def collect_resolved_inputs(args: argparse.Namespace) -> tuple[str, str, str, st
 
 
 def infer_metadata_from_source(script_dir: Path, source: str) -> dict:
-    metadata_script = script_dir / "metadata-scrapper-CB.py"
-    if not metadata_script.exists():
-        raise FileNotFoundError(f"Could not find metadata-scrapper-CB.py at {metadata_script}")
+    metadata_script = script_dir / "metadata-scraper-CB.py"
+    legacy_metadata_script = script_dir / "metadata-scrapper-CB.py"
+    if metadata_script.exists():
+        selected_script = metadata_script
+    elif legacy_metadata_script.exists():
+        selected_script = legacy_metadata_script
+    else:
+        raise FileNotFoundError(f"Could not find metadata-scraper-CB.py at {metadata_script}")
+
+    metadata_script = selected_script
 
     source_path = Path(source).expanduser()
     if not source_path.exists():
@@ -99,18 +106,18 @@ def infer_metadata_from_source(script_dir: Path, source: str) -> dict:
         "--output-format",
         "json",
     ]
-    print("Inferring CB metadata from metadata-scrapper-CB.py:")
+    print(f"Inferring CB metadata from {metadata_script.name}:")
     print(" ".join(metadata_cmd))
 
     result = subprocess.run(metadata_cmd, cwd=script_dir, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        raise RuntimeError(stderr or f"metadata-scrapper-CB.py failed with code {result.returncode}")
+        raise RuntimeError(stderr or f"{metadata_script.name} failed with code {result.returncode}")
 
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Could not parse metadata-scrapper-CB.py output: {exc}\nOutput:\n{result.stdout}") from exc
+        raise RuntimeError(f"Could not parse {metadata_script.name} output: {exc}\nOutput:\n{result.stdout}") from exc
 
 
 def run_build(script_dir: Path, project_code: str, object_name: str, url: str, observation_date: str, args: argparse.Namespace) -> None:

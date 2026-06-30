@@ -3,6 +3,7 @@
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,8 @@ from pathlib import Path
 from typing import Tuple
 from urllib.parse import urlparse
 import urllib.request
+
+from build_CB import find_first_observation_dir, get_all_files_from_directory
 
 
 def parse_args():
@@ -125,6 +128,26 @@ def parse_mjd_to_date(value: str) -> str:
         return None
 
 
+def download_remote_files(url: str, target_dir: Path, extensions=None) -> None:
+    file_list = get_all_files_from_directory(url, base_url=url)
+    if not file_list:
+        raise RuntimeError(f"No files found for remote directory download at {url}")
+
+    filtered_files = []
+    if extensions is not None:
+        extensions = {ext.lower() for ext in extensions}
+        for relative, item_url in file_list:
+            if Path(relative).suffix.lower() in extensions:
+                filtered_files.append((relative, item_url))
+        if filtered_files:
+            file_list = filtered_files
+
+    for relative_path, file_url in file_list:
+        destination = target_dir / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(file_url, str(destination))
+
+
 def infer_metadata_from_remote_url(url: str) -> dict:
     parsed = urlparse(url)
     path_parts = [part for part in parsed.path.split("/") if part]
@@ -137,6 +160,40 @@ def infer_metadata_from_remote_url(url: str) -> dict:
         if match and project_code is None:
             project_code = match.group(1)
             break
+
+    if is_remote_url(url):
+        if path_parts and path_parts[-1].startswith("observation"):
+            observation_dir_url = url
+        else:
+            obs_info = find_first_observation_dir(url)
+            observation_dir_url = obs_info[1] if obs_info else None
+            if obs_info and project_code is None:
+                obs_parsed = urlparse(observation_dir_url)
+                obs_parts = [part for part in obs_parsed.path.split("/") if part]
+                for part in obs_parts:
+                    if re.match(r"^\d{2}[A-Z]-\d{3}$", part):
+                        project_code = part
+                        break
+
+        if observation_dir_url:
+            temp_dir_name = None
+            try:
+                with tempfile.TemporaryDirectory() as temp_dir_name:
+                    temp_dir = Path(temp_dir_name)
+                    remote_metadata_dir = temp_dir / "remote_metadata"
+                    remote_metadata_dir.mkdir(parents=True, exist_ok=True)
+                    download_remote_files(observation_dir_url, remote_metadata_dir, extensions={".xml"})
+                    metadata = run_metadata_scraper(Path(__file__).resolve().parent, remote_metadata_dir, project_code_override=project_code)
+                    project_code = project_code or metadata.get("project_code")
+                    object_name = metadata.get("object_name") or object_name
+                    observation_date = observation_date or metadata.get("observation_date")
+            except Exception as exc:
+                print(f"Warning: Remote metadata extraction failed: {exc}")
+            finally:
+                if temp_dir_name:
+                    temp_path = Path(temp_dir_name)
+                    if temp_path.exists():
+                        shutil.rmtree(temp_path, ignore_errors=True)
 
     try:
         with urllib.request.urlopen(url) as response:
@@ -181,7 +238,7 @@ def infer_metadata_from_remote_url(url: str) -> dict:
     }
 
 
-def run_metadata_scraper(script_dir: Path, source_path: Path) -> dict:
+def run_metadata_scraper(script_dir: Path, source_path: Path, project_code_override: str = None) -> dict:
     metadata_script = script_dir / "metadata-scraper-CB.py"
     legacy_metadata_script = script_dir / "metadata-scrapper-CB.py"
     if metadata_script.exists():
@@ -198,6 +255,9 @@ def run_metadata_scraper(script_dir: Path, source_path: Path) -> dict:
         "--output-format",
         "json",
     ]
+    if project_code_override:
+        metadata_cmd.extend(["--project-code", project_code_override])
+
     print(f"Inferring CB metadata from {selected_script.name}:")
     print(" ".join(metadata_cmd))
 

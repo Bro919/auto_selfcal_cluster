@@ -540,6 +540,21 @@ def main():
     if ms_path is None:
         sys.exit(f"Error: No .ms directory found in workdir {workdir}")
 
+    # Try to read extracted metadata from build_ASC.py
+    extracted_metadata_file = workdir / ".extracted_metadata"
+    if extracted_metadata_file.exists():
+        try:
+            with extracted_metadata_file.open("r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("project_code="):
+                        extracted_project_code = line.split("=", 1)[1]
+                        if args.project_code == "unknown" and extracted_project_code:
+                            args.project_code = extracted_project_code
+                            print(f"Using extracted project code: {args.project_code}")
+        except Exception as e:
+            print(f"Warning: Could not read extracted metadata file: {e}")
+
     metadata_missing = [
         name
         for name, value in [
@@ -547,7 +562,7 @@ def main():
             ("object_name", args.object_name),
             ("observation_date", args.observation_date),
         ]
-        if not value
+        if not value or value == "unknown"
     ]
     if args.use_ms_metadata or metadata_missing:
         ms_command = [
@@ -557,19 +572,27 @@ def main():
             "--output-format",
             "json",
         ]
-        if args.project_code:
+        if args.project_code and args.project_code != "unknown":
             ms_command.extend(["--project-code", args.project_code])
-        result = subprocess.Popen(ms_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = result.communicate()
-        returncode = result.returncode
-        stdout_text = stdout.decode('utf-8', errors='replace')
-        stderr_text = stderr.decode('utf-8', errors='replace')
-        if returncode != 0:
-            sys.exit(f"Error extracting metadata from MS path: {stderr_text.strip()}")
+        
+        print(f"Inferring ASC metadata from {resolve_metadata_scraper(script_dir).name}:")
+        print(" ".join(ms_command))
+        
+        result = subprocess.run(
+            ms_command,
+            cwd=script_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            sys.exit(f"Error extracting metadata from MS path: {stderr or f'Metadata scraper failed with code {result.returncode}'}")
         try:
-            ms_metadata = json.loads(stdout_text)
-        except ValueError as exc:
-            sys.exit(f"Error parsing metadata from {resolve_metadata_scraper(script_dir).name}: {exc}\nOutput:\n{stdout_text}")
+            ms_metadata = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            sys.exit(f"Error parsing metadata from {resolve_metadata_scraper(script_dir).name}: {exc}\nOutput:\n{result.stdout}")
         args.project_code = args.project_code or ms_metadata["project_code"]
         args.object_name = args.object_name or ms_metadata["object_name"]
         args.observation_date = args.observation_date or ms_metadata["observation_date"]
@@ -580,7 +603,7 @@ def main():
                 ("object_name", args.object_name),
                 ("observation_date", args.observation_date),
             ]
-            if not value
+            if not value or value == "unknown"
         ]
 
         if not metadata_missing:
@@ -594,9 +617,30 @@ def main():
 
     if metadata_missing:
         sys.exit(
-            "Missing metadata: {}. Provide these manually or supply an input path with enough metadata."
-            .format(", ".join(metadata_missing))
+            f"Could not resolve {', '.join(metadata_missing)}. "
+            "Provide them explicitly or ensure the metadata scraper can extract them from the measurement set."
         )
+
+    # Convert "unknown" to None for cleaner handling
+    if args.project_code == "unknown":
+        args.project_code = None
+    if args.object_name == "unknown":
+        args.object_name = None
+    if args.observation_date == "unknown":
+        args.observation_date = None
+
+    # Final validation
+    if not args.project_code or not args.object_name or not args.observation_date:
+        sys.exit(
+            f"Could not resolve all required metadata. "
+            f"project_code={args.project_code}, object_name={args.object_name}, observation_date={args.observation_date}. "
+            "Provide them explicitly or ensure the metadata scraper can extract them from the measurement set."
+        )
+
+    print(
+        f"Resolved ASC metadata: project_code={args.project_code}, object_name={args.object_name}, "
+        f"observation_date={args.observation_date}"
+    )
 
     if args.object_name and args.observation_date:
         measurement_set_name = f"{args.project_code}.{args.object_name}.{args.observation_date}.ms"

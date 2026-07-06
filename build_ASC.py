@@ -103,6 +103,9 @@ def main():
     # Create working directory
     workdir_path.mkdir(parents=True, exist_ok=True)
 
+    # Initialize extracted metadata variable
+    extracted_project_code = None
+
     # --- Directory download approach first ---
     base_url = args.url.rstrip('/')
 
@@ -250,10 +253,21 @@ def main():
                 ms_dirs.extend([p for p in d.rglob('*') if p.is_dir() and p.name.endswith('.ms')])
         ms_dir = None
         target_ms = None
+        extracted_project_code = None
         if ms_dirs:
             if len(ms_dirs) > 1:
                 print("Warning: Multiple .ms directories found; using the first one.")
             ms_dir = ms_dirs[0]
+            # Extract project code from the path before moving
+            # e.g., temp_dir/24A-322/pipeline.../24A-322...ms -> extract "24A-322"
+            path_parts = ms_dir.parts
+            for part in path_parts:
+                match = re.search(r'[0-9]{2}[A-Z]-[0-9]{3}', part)
+                if match:
+                    extracted_project_code = match.group(0)
+                    break
+            if extracted_project_code:
+                print(f"Extracted project code from path: {extracted_project_code}")
             target_ms = workdir_path / f"{workdir_name}.ms"
             if target_ms.exists():
                 if target_ms.is_dir():
@@ -337,6 +351,15 @@ def main():
             if len(ms_dirs) > 1:
                 print("Warning: Multiple .ms directories found; using the first one.")
             ms_dir = ms_dirs[0]
+            # Extract project code from the path before moving
+            path_parts = ms_dir.parts
+            for part in path_parts:
+                match = re.search(r'[0-9]{2}[A-Z]-[0-9]{3}', part)
+                if match:
+                    extracted_project_code = match.group(0)
+                    break
+            if extracted_project_code:
+                print(f"Extracted project code from path: {extracted_project_code}")
             target_ms = workdir_path / f"{workdir_name}.ms"
             if target_ms.exists():
                 if target_ms.is_dir():
@@ -373,6 +396,15 @@ def main():
 
     print(f'Final working directory created at: {workdir_path.resolve()}')
     print("Process completed successfully.")
+
+    # Write extracted metadata to a file for use by run_build_and_prep_ASC.py
+    if extracted_project_code:
+        metadata_file = workdir_path / ".extracted_metadata"
+        try:
+            with metadata_file.open("w") as f:
+                f.write(f"project_code={extracted_project_code}\n")
+        except Exception as e:
+            print(f"Warning: Could not write extracted metadata file: {e}")
 
     # --- Edit prep and clean scripts in working directory ---
     prep_script = workdir_path / "prep-ms-for-auto-selfcal.py"

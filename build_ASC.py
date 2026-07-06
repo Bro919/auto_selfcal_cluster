@@ -105,7 +105,6 @@ def main():
 
     # --- Directory download approach first ---
     base_url = args.url.rstrip('/')
-    dir_url = f"{base_url}/{args.project_code}"
 
     def find_first_ms_dir(url, visited=None):
         """Recursively search for the first directory whose name ends with '.ms' and return
@@ -199,7 +198,16 @@ def main():
             return all_files
 
     # Try to find the first .ms directory and download only its contents when present
-    ms_info = find_first_ms_dir(dir_url)
+    # First, try the URL as-is (complete path scenario)
+    ms_info = find_first_ms_dir(base_url)
+    dir_url = base_url
+    
+    # If no results and project_code is not "unknown", try appending project_code (base URL scenario)
+    if not ms_info and args.project_code != "unknown":
+        dir_url = f"{base_url}/{args.project_code}"
+        print(f"No .ms directory found at {base_url}; trying with project code: {dir_url}")
+        ms_info = find_first_ms_dir(dir_url)
+    
     if ms_info:
         ms_rel_path, ms_url = ms_info
         print(f"Found .ms directory: {ms_rel_path}; downloading only its contents from {ms_url}")

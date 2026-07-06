@@ -26,6 +26,10 @@ def parse_args():
         help="Path to a local measurement set directory, extracted SDM-BDF root, or a CB-style working directory for metadata extraction and local workdir creation",
     )
     parser.add_argument(
+        "--source",
+        help="Alias for --ms-path; use a local source path to let the ASC metadata scraper provide project code, object name, and observation date.",
+    )
+    parser.add_argument(
         "--use-ms-metadata",
         action="store_true",
         help="When metadata values are missing, extract them from the downloaded .ms or local MS path using the ASC metadata scraper.",
@@ -66,6 +70,18 @@ def parse_args():
 
 def compute_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
     return Path(f"{project_code}.{object_name}.{observation_date}")
+
+
+def parse_named_inputs(inputs):
+    named_inputs = {}
+    positional_inputs = []
+    for token in inputs:
+        if "=" in token and not token.startswith("--"):
+            key, value = token.split("=", 1)
+            named_inputs[key.strip()] = value.strip()
+        else:
+            positional_inputs.append(token)
+    return named_inputs, positional_inputs
 
 
 def is_ms_dir(path: Path) -> bool:
@@ -151,6 +167,35 @@ def scrape_local_metadata(input_path: Path, project_code: Optional[str] = None) 
         return json.loads(stdout_text)
     except ValueError as exc:
         raise RuntimeError(f"Could not parse {metadata_script.name} output: {exc}\nOutput:\n{stdout_text}") from exc
+
+
+def resolve_metadata_from_source(
+    source_path: Optional[Union[str, Path]],
+    project_code: Optional[str] = None,
+    object_name: Optional[str] = None,
+    observation_date: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    if source_path is None:
+        return project_code, object_name, observation_date
+
+    source_path = Path(source_path).expanduser()
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source path does not exist: {source_path}")
+
+    metadata = scrape_local_metadata(source_path, project_code=project_code)
+    resolved_project_code = metadata.get("project_code")
+    if not resolved_project_code or resolved_project_code == "unknown":
+        resolved_project_code = project_code
+
+    resolved_object_name = metadata.get("object_name")
+    if not resolved_object_name or resolved_object_name == "unknown":
+        resolved_object_name = object_name
+
+    resolved_observation_date = metadata.get("observation_date")
+    if not resolved_observation_date or resolved_observation_date == "unknown":
+        resolved_observation_date = observation_date
+
+    return resolved_project_code, resolved_object_name, resolved_observation_date
 
 
 def prepare_workdir_from_local_input(
@@ -336,6 +381,18 @@ def launch_casa_and_exec_prep(casa_executable: str, workdir: Path, prep_script_p
 def main():
     args = parse_args()
 
+    named_inputs, positional_inputs = parse_named_inputs(sys.argv[1:])
+    if named_inputs.get("project_code") and not args.project_code:
+        args.project_code = named_inputs["project_code"]
+    if named_inputs.get("object_name") and not args.object_name:
+        args.object_name = named_inputs["object_name"]
+    if named_inputs.get("observation_date") and not args.observation_date:
+        args.observation_date = named_inputs["observation_date"]
+    if named_inputs.get("url") and not args.url:
+        args.url = named_inputs["url"]
+    if named_inputs.get("source") and not args.ms_path and not args.source:
+        args.source = named_inputs["source"]
+
     if args.project_code and args.project_code.startswith("url="):
         args.url = args.project_code.split("=", 1)[1]
         args.project_code = None
@@ -354,13 +411,26 @@ def main():
         else:
             args.url = args.url_arg
 
+    source_value = args.ms_path or args.source
+    if source_value:
+        source_path = Path(source_value).expanduser()
+        if not source_path.exists():
+            sys.exit(f"Error: source path does not exist: {source_path}")
+        if args.url:
+            print("Warning: source path provided; ignoring --url and using local input instead.")
+
+        try:
+            args.project_code, args.object_name, args.observation_date = resolve_metadata_from_source(
+                source_path,
+                project_code=args.project_code,
+                object_name=args.object_name,
+                observation_date=args.observation_date,
+            )
+        except RuntimeError as exc:
+            sys.exit(f"Error extracting metadata from local input: {exc}")
+
     if args.ms_path:
         ms_input = Path(args.ms_path)
-        if not ms_input.exists():
-            sys.exit(f"Error: --ms-path does not exist: {ms_input}")
-        if args.url:
-            print("Warning: --ms-path provided; ignoring --url and using local input instead.")
-
         metadata_missing = [
             name
             for name, value in [
@@ -370,24 +440,6 @@ def main():
             ]
             if not value
         ]
-        if args.use_ms_metadata or metadata_missing:
-            try:
-                metadata = scrape_local_metadata(ms_input, args.project_code)
-            except RuntimeError as exc:
-                sys.exit(f"Error extracting metadata from local input: {exc}")
-            args.project_code = args.project_code or metadata.get("project_code")
-            args.object_name = args.object_name or metadata.get("object_name")
-            args.observation_date = args.observation_date or metadata.get("observation_date")
-            metadata_missing = [
-                name
-                for name, value in [
-                    ("project_code", args.project_code),
-                    ("object_name", args.object_name),
-                    ("observation_date", args.observation_date),
-                ]
-                if not value
-            ]
-
         if metadata_missing:
             sys.exit(
                 "Missing metadata: {}. Provide these manually or supply an input path with enough metadata."

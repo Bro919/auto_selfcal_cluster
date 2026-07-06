@@ -240,6 +240,8 @@ def main():
                 ms_dirs.append(d)
             else:
                 ms_dirs.extend([p for p in d.rglob('*') if p.is_dir() and p.name.endswith('.ms')])
+        ms_dir = None
+        target_ms = None
         if ms_dirs:
             if len(ms_dirs) > 1:
                 print("Warning: Multiple .ms directories found; using the first one.")
@@ -255,7 +257,8 @@ def main():
             except Exception as e:
                 sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
         else:
-            print("No .ms directory found in downloaded content. Using downloaded structure as-is.")
+            print("No .ms directory found in downloaded content. The remote URL may not contain a measurement set.")
+            sys.exit("Error: No measurement set directory was found in the downloaded content. The remote URL may not contain an .ms or downloadable archive.")
         try:
             if temp_dir.exists():
                 shutil.rmtree(str(temp_dir))
@@ -344,11 +347,7 @@ def main():
                     print(f"Warning: could not remove {extracted_dir}: {e}")
         else:
             print("No tar file found or extracted. Unable to proceed.")
-            
-            try:
-                shutil.move(str(ms_dir), str(target_ms))
-            except Exception as e:
-                sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
+            sys.exit("Error: No measurement set directory was found in the downloaded content. The remote URL may not contain an .ms or a downloadable tar archive.")
         # Clean up temp directory
         try:
             if 'temp_dir' in locals() and temp_dir.exists():

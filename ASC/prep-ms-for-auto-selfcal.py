@@ -214,7 +214,12 @@ def split_ms(df_store, measurement_set_target):
 
 # where things are
 ms_directory = os.path.dirname(measurement_set)
-auto_sc_files_directory = "/lustre/aoc/observers/nm-15783/auto_selfcal_cluster/ASC/auto_selfcal"
+auto_sc_files_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "repo")
+if not os.path.isdir(auto_sc_files_directory):
+    raise FileNotFoundError(
+        f"auto_selfcal repository not found at {auto_sc_files_directory}. "
+        "Initialize the ASC/repo submodule or pass --auto_sc_dir."
+    )
 
 # create listfile and scrape for tclean parameters
 listfile = ms_directory+"listfile.txt"
@@ -254,10 +259,15 @@ for i in range(len(split_ms_directories)):
     split_ms_path = split_ms_paths[i]
     split_ms_name = os.path.splitext(os.path.basename(split_ms_path))[0] 
 
-    # move all the files from the auto_sc directory into directory
+    # move the auto_selfcal dependency files into this split directory
     os.makedirs(split_ms_directory, exist_ok=True)
-    for filepath in glob.glob(os.path.join(auto_sc_files_directory, '*.py')):
-        shutil.copy2(filepath, split_ms_directory)    
+    auto_sc_bin_dir = os.path.join(auto_sc_files_directory, 'bin')
+    auto_sc_package_dir = os.path.join(auto_sc_files_directory, 'auto_selfcal')
+    if os.path.isdir(auto_sc_bin_dir):
+        for filepath in glob.glob(os.path.join(auto_sc_bin_dir, '*.py')):
+            shutil.copy2(filepath, split_ms_directory)
+    if os.path.isdir(auto_sc_package_dir):
+        shutil.copytree(auto_sc_package_dir, os.path.join(split_ms_directory, 'auto_selfcal'), dirs_exist_ok=True)
 
     # write batch file
     job_base = f"auto_selfcal_{split_ms_name}"

@@ -1,3 +1,3 @@
-[submodule "/lustre/aoc/observers/nm-15783/test/auto_selfcal_cluster/ASC/repo"]
-	path = /lustre/aoc/observers/nm-15783/test/auto_selfcal_cluster/ASC/repo
+[submodule "ASC/repo"]
+	path = ASC/repo
 	url = https://github.com/psheehan/auto_selfcal

@@ -50,6 +50,8 @@ def normalize_date_token(token):
     if token is None:
         return None
     token = str(token).strip()
+    if not token:
+        return None
     if re.match(r"^\d{4}-\d{2}-\d{2}$", token):
         return token
     m = re.match(r"^(\d{4})(\d{2})(\d{2})$", token)
@@ -58,6 +60,17 @@ def normalize_date_token(token):
     m = re.match(r"^(\d{4})(\d{2})(\d{2})[-_].*$", token)
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{5,6})(?:\.\d+)?$", token)
+    if m:
+        try:
+            mjd = float(m.group(1))
+        except ValueError:
+            return None
+        if mjd > 1000:
+            try:
+                return (datetime(1858, 11, 17) + timedelta(days=mjd)).date().isoformat()
+            except OverflowError:
+                return None
     return None
 
 
@@ -77,8 +90,8 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
 
     for segment in segments:
         parts = segment.split('.')
-        if len(parts) >= 3:
-            maybe_date = normalize_date_token(parts[-1])
+        for candidate in [segment] + parts:
+            maybe_date = normalize_date_token(candidate)
             if maybe_date:
                 date_candidate = maybe_date
                 if project_code is None and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parts[0]):
@@ -86,6 +99,8 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
                 if len(parts) >= 3:
                     target_candidate = '.'.join(parts[1:-1])
                 break
+        if date_candidate is not None:
+            break
 
     if date_candidate is None:
         for segment in segments:

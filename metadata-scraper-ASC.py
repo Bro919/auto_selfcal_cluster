@@ -214,9 +214,31 @@ def parse_ms_time(value):
         return None
 
 
+def read_extracted_metadata_from_workdir(ms_path):
+    metadata_file = Path(ms_path).parent / ".extracted_metadata"
+    if not metadata_file.exists():
+        return None
+    values = {}
+    try:
+        with metadata_file.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                values[key] = value
+    except Exception:
+        return None
+    return values
+
+
 def extract_ms_project_code(ms_path, project_code_override=None):
     if project_code_override:
         return project_code_override
+
+    extracted = read_extracted_metadata_from_workdir(ms_path)
+    if extracted and extracted.get("project_code"):
+        return extracted["project_code"]
 
     project_code = None
     if TABLE_BACKEND:
@@ -249,6 +271,10 @@ def extract_ms_project_code(ms_path, project_code_override=None):
 
 
 def extract_ms_object_name(ms_path):
+    extracted = read_extracted_metadata_from_workdir(ms_path)
+    if extracted and extracted.get("object_name"):
+        return extracted["object_name"]
+
     object_name = None
     if TABLE_BACKEND:
         table = None
@@ -307,6 +333,10 @@ def extract_ms_object_name(ms_path):
 
 
 def extract_ms_observation_date(ms_path):
+    extracted = read_extracted_metadata_from_workdir(ms_path)
+    if extracted and extracted.get("observation_date"):
+        return extracted["observation_date"]
+
     observation_date = None
     if TABLE_BACKEND:
         table = None

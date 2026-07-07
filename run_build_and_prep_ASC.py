@@ -179,9 +179,6 @@ def resolve_local_measurement_set(input_path: Path) -> Path:
 def resolve_metadata_scraper(script_dir: Path) -> Path:
     candidates = [
         script_dir / "metadata-scraper-ASC.py",
-        script_dir / "metadata-scrapper-ASC.py",
-        script_dir / "meatadata-scrapper-ASC.py",
-        script_dir / "metadata-scraper-CB.py",
     ]
     for candidate in candidates:
         if candidate.exists():

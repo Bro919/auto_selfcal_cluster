@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Optional, Tuple, Union
+from urllib.parse import urlparse
 
 
 def parse_args():
@@ -82,6 +83,19 @@ def parse_named_inputs(inputs):
         else:
             positional_inputs.append(token)
     return named_inputs, positional_inputs
+
+
+def extract_project_code_from_url(url: str) -> Optional[str]:
+    """Extract project code (e.g., 24A-322) from URL path."""
+    if not url:
+        return None
+    parsed = urlparse(url)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    for part in path_parts:
+        match = re.search(r'\b(\d{2}[A-Z]-\d{3})\b', part)
+        if match:
+            return match.group(1)
+    return None
 
 
 def is_ms_dir(path: Path) -> bool:
@@ -507,6 +521,12 @@ def main():
             "Usage error: url must be provided either with --url or as a positional argument like url=<value> or <raw-url>."
         )
 
+    # Try to extract project code from URL path before building
+    url_project_code = extract_project_code_from_url(args.url)
+    if url_project_code and (not args.project_code or args.project_code == "unknown"):
+        print(f"Extracted project code from URL path: {url_project_code}")
+        args.project_code = url_project_code
+
     build_project_code = args.project_code or "unknown"
     build_object = args.object_name or "unknown"
     build_date = args.observation_date or "unknown"
@@ -544,6 +564,7 @@ def main():
     extracted_metadata_file = workdir / ".extracted_metadata"
     if extracted_metadata_file.exists():
         try:
+            print(f"Reading extracted metadata from {extracted_metadata_file}")
             with extracted_metadata_file.open("r") as f:
                 for line in f:
                     line = line.strip()
@@ -551,9 +572,11 @@ def main():
                         extracted_project_code = line.split("=", 1)[1]
                         if args.project_code == "unknown" and extracted_project_code:
                             args.project_code = extracted_project_code
-                            print(f"Using extracted project code: {args.project_code}")
+                            print(f"Using extracted project code from file: {args.project_code}")
         except Exception as e:
             print(f"Warning: Could not read extracted metadata file: {e}")
+    else:
+        print(f"Note: No extracted metadata file found at {extracted_metadata_file}")
 
     metadata_missing = [
         name

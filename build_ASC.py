@@ -403,8 +403,11 @@ def main():
         try:
             with metadata_file.open("w") as f:
                 f.write(f"project_code={extracted_project_code}\n")
+            print(f"Wrote extracted metadata to {metadata_file}")
         except Exception as e:
             print(f"Warning: Could not write extracted metadata file: {e}")
+    else:
+        print("Warning: No project code was extracted from the path")
 
     # --- Edit prep and clean scripts in working directory ---
     prep_script = workdir_path / "prep-ms-for-auto-selfcal.py"

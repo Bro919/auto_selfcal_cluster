@@ -98,6 +98,40 @@ def extract_project_code_from_url(url: str) -> Optional[str]:
     return None
 
 
+def apply_extracted_metadata(
+    workdir: Path,
+    project_code: Optional[str] = None,
+    object_name: Optional[str] = None,
+    observation_date: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    metadata_file = workdir / ".extracted_metadata"
+    if not metadata_file.exists():
+        return project_code, object_name, observation_date
+
+    values = {
+        "project_code": project_code,
+        "object_name": object_name,
+        "observation_date": observation_date,
+    }
+    try:
+        with metadata_file.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key in values and not values[key] in (None, "unknown"):
+                    continue
+                values[key] = value
+    except Exception as exc:
+        print(f"Warning: Could not read extracted metadata file: {exc}")
+
+    if values["project_code"] not in (None, "unknown"):
+        print(f"Using extracted project code from file: {values['project_code']}")
+
+    return values["project_code"], values["object_name"], values["observation_date"]
+
+
 def is_ms_dir(path: Path) -> bool:
     path = Path(path)
     if not path.is_dir():
@@ -560,21 +594,15 @@ def main():
     if ms_path is None:
         sys.exit(f"Error: No .ms directory found in workdir {workdir}")
 
-    # Try to read extracted metadata from build_ASC.py
     extracted_metadata_file = workdir / ".extracted_metadata"
     if extracted_metadata_file.exists():
-        try:
-            print(f"Reading extracted metadata from {extracted_metadata_file}")
-            with extracted_metadata_file.open("r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("project_code="):
-                        extracted_project_code = line.split("=", 1)[1]
-                        if args.project_code == "unknown" and extracted_project_code:
-                            args.project_code = extracted_project_code
-                            print(f"Using extracted project code from file: {args.project_code}")
-        except Exception as e:
-            print(f"Warning: Could not read extracted metadata file: {e}")
+        print(f"Reading extracted metadata from {extracted_metadata_file}")
+        args.project_code, args.object_name, args.observation_date = apply_extracted_metadata(
+            workdir,
+            project_code=args.project_code,
+            object_name=args.object_name,
+            observation_date=args.observation_date,
+        )
     else:
         print(f"Note: No extracted metadata file found at {extracted_metadata_file}")
 

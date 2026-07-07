@@ -641,9 +641,12 @@ def main():
             ms_metadata = json.loads(result.stdout)
         except json.JSONDecodeError as exc:
             sys.exit(f"Error parsing metadata from {resolve_metadata_scraper(script_dir).name}: {exc}\nOutput:\n{result.stdout}")
-        args.project_code = args.project_code or ms_metadata["project_code"]
-        args.object_name = args.object_name or ms_metadata["object_name"]
-        args.observation_date = args.observation_date or ms_metadata["observation_date"]
+        if not args.project_code or args.project_code == "unknown":
+            args.project_code = ms_metadata["project_code"]
+        if not args.object_name or args.object_name == "unknown":
+            args.object_name = ms_metadata["object_name"]
+        if not args.observation_date or args.observation_date == "unknown":
+            args.observation_date = ms_metadata["observation_date"]
         metadata_missing = [
             name
             for name, value in [

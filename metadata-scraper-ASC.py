@@ -76,7 +76,8 @@ def normalize_date_token(token):
 
 def infer_metadata_from_path(ms_path, project_code_override=None):
     project_code = project_code_override
-    segments = [Path(seg).name for seg in Path(ms_path).parents] + [Path(ms_path).name]
+    path = Path(ms_path)
+    segments = [path.name] + [Path(seg).name for seg in path.parents]
 
     if project_code is None:
         for segment in segments:
@@ -202,7 +203,7 @@ def parse_ms_time(value):
     else:
         days = value
 
-    if days < 2400000:
+    if days < 1000:
         days = None
     if days is None:
         return None

@@ -107,6 +107,33 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
     path = Path(ms_path)
     segments = [path.name] + [Path(seg).name for seg in path.parents]
 
+    def infer_target_from_parts(parts, known_project_code, known_date):
+        if len(parts) < 3:
+            return None
+
+        project_idx = None
+        if known_project_code and known_project_code in parts:
+            project_idx = parts.index(known_project_code)
+        elif re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parts[0]):
+            project_idx = 0
+
+        date_idx = None
+        for idx, part in enumerate(parts):
+            if normalize_date_token(part) == known_date:
+                date_idx = idx
+                break
+
+        if project_idx is not None and date_idx is not None and project_idx < date_idx - 1:
+            candidate = '.'.join(parts[project_idx + 1:date_idx]).strip('.')
+            return candidate or None
+
+        if date_idx is not None and date_idx > 1:
+            candidate = '.'.join(parts[1:date_idx]).strip('.')
+            return candidate or None
+
+        candidate = '.'.join(parts[1:-1]).strip('.')
+        return candidate or None
+
     if project_code is None:
         for segment in segments:
             match = re.search(r"[0-9]{2}[A-Z]-[0-9]{3}", segment)
@@ -126,7 +153,7 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
                 if project_code is None and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parts[0]):
                     project_code = parts[0]
                 if len(parts) >= 3:
-                    target_candidate = '.'.join(parts[1:-1])
+                    target_candidate = infer_target_from_parts(parts, project_code, date_candidate)
                 break
         if date_candidate is not None:
             break
@@ -143,8 +170,12 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
             if project_code in segment and date_candidate.replace('-', '') in segment:
                 parts = segment.split('.')
                 if len(parts) >= 3:
-                    target_candidate = '.'.join(parts[1:-1])
+                    target_candidate = infer_target_from_parts(parts, project_code, date_candidate)
                     break
+
+    if target_candidate and project_code:
+        pattern = rf'^{re.escape(project_code)}[._-]+'
+        target_candidate = re.sub(pattern, '', target_candidate).strip('._-')
 
     if is_missing_metadata_value(target_candidate):
         target_candidate = None

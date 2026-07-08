@@ -46,6 +46,22 @@ def is_ms_dir(path):
     return bool(folder_names & {"FIELD", "MAIN", "ANTENNA", "SOURCE", "SPECTRAL_WINDOW", "OBSERVATION"})
 
 
+def find_ms_directory(root_dir):
+    root_dir = Path(root_dir)
+    if is_ms_dir(root_dir):
+        return root_dir
+
+    if not root_dir.is_dir():
+        return None
+
+    direct_children = [child for child in root_dir.iterdir() if child.is_dir() and child.name.endswith(".ms")]
+    if direct_children:
+        return direct_children[0]
+
+    recursive_children = [child for child in root_dir.rglob("*.ms") if child.is_dir()]
+    return recursive_children[0] if recursive_children else None
+
+
 def normalize_date_token(token):
     if token is None:
         return None
@@ -396,11 +412,15 @@ def extract_ms_observation_date(ms_path):
 
 
 def extract_ms_metadata(ms_path, project_code_override=None):
-    ms_path = Path(ms_path)
-    if not ms_path.exists():
-        raise FileNotFoundError(f"Measurement set path not found: {ms_path}")
-    if not is_ms_dir(ms_path):
-        raise RuntimeError(f"Path is not a recognized measurement set directory: {ms_path}")
+    input_path = Path(ms_path)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Measurement set path not found: {input_path}")
+
+    ms_path = find_ms_directory(input_path)
+    if ms_path is None:
+        raise RuntimeError(
+            f"Path is not a recognized measurement set directory and does not contain one: {input_path}"
+        )
 
     project_code = extract_ms_project_code(ms_path, project_code_override)
     object_name = extract_ms_object_name(ms_path)

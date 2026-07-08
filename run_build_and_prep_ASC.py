@@ -95,6 +95,9 @@ def copy_tree(src: Path, dst: Path) -> None:
         raise FileNotFoundError(f"Source path not found: {src}")
     dst.mkdir(parents=True, exist_ok=True)
     for item in src.iterdir():
+        # Skip VCS metadata; it is not needed for runtime and can fail on shared filesystems.
+        if item.name in {".git", ".hg", ".svn"}:
+            continue
         dest_item = dst / item.name
         if item.is_dir():
             shutil.copytree(str(item), str(dest_item))

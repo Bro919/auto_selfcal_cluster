@@ -725,13 +725,21 @@ def main():
             universal_newlines=True,
             check=False,
         )
+        ms_metadata = {}
         if result.returncode != 0:
             stderr = result.stderr.strip()
-            sys.exit(f"Error extracting metadata from MS path: {stderr or f'Metadata scraper failed with code {result.returncode}'}")
-        try:
-            ms_metadata = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
-            sys.exit(f"Error parsing metadata from {resolve_metadata_scraper(script_dir).name}: {exc}\nOutput:\n{result.stdout}")
+            print(
+                "Warning: ASC metadata scraper did not resolve all metadata: "
+                f"{stderr or f'Metadata scraper failed with code {result.returncode}'}"
+            )
+        else:
+            try:
+                ms_metadata = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                print(
+                    f"Warning: Could not parse metadata from {resolve_metadata_scraper(script_dir).name}: "
+                    f"{exc}\nOutput:\n{result.stdout}"
+                )
         if is_missing_metadata_value(args.project_code) and not is_missing_metadata_value(ms_metadata.get("project_code")):
             args.project_code = ms_metadata["project_code"]
         if is_missing_metadata_value(args.object_name) and not is_missing_metadata_value(ms_metadata.get("object_name")):

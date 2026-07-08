@@ -74,6 +74,18 @@ def normalize_date_token(token):
     return None
 
 
+def is_missing_metadata_value(value):
+    if value is None:
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    if text.lower() == "unknown":
+        return True
+    parts = [part for part in re.split(r"[._]+", text.lower()) if part]
+    return bool(parts) and all(part == "unknown" for part in parts)
+
+
 def infer_metadata_from_path(ms_path, project_code_override=None):
     project_code = project_code_override
     path = Path(ms_path)
@@ -118,10 +130,21 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
                     target_candidate = '.'.join(parts[1:-1])
                     break
 
+    if is_missing_metadata_value(target_candidate):
+        target_candidate = None
+
     if target_candidate is None:
         parent_name = Path(ms_path).parent.name
-        if parent_name and parent_name != project_code and normalize_date_token(parent_name) is None:
+        if (
+            parent_name
+            and parent_name != project_code
+            and normalize_date_token(parent_name) is None
+            and not is_missing_metadata_value(parent_name)
+        ):
             target_candidate = parent_name
+
+    if is_missing_metadata_value(target_candidate):
+        target_candidate = None
 
     if date_candidate is None:
         for segment in segments:
@@ -273,7 +296,7 @@ def extract_ms_project_code(ms_path, project_code_override=None):
 
 def extract_ms_object_name(ms_path):
     extracted = read_extracted_metadata_from_workdir(ms_path)
-    if extracted and extracted.get("object_name"):
+    if extracted and not is_missing_metadata_value(extracted.get("object_name")):
         return extracted["object_name"]
 
     object_name = None
@@ -290,7 +313,7 @@ def extract_ms_object_name(ms_path):
                     if value is None:
                         continue
                     text = str(value).strip()
-                    if text:
+                    if not is_missing_metadata_value(text):
                         object_name = text
                         break
                 if object_name:
@@ -316,7 +339,7 @@ def extract_ms_object_name(ms_path):
                         if value is None:
                             continue
                         text = str(value).strip()
-                        if text:
+                        if not is_missing_metadata_value(text):
                             object_name = text
                             break
                     if object_name:
@@ -330,6 +353,8 @@ def extract_ms_object_name(ms_path):
     if object_name is None:
         _, path_target, _ = infer_metadata_from_path(ms_path)
         object_name = path_target
+    if is_missing_metadata_value(object_name):
+        object_name = None
     return object_name
 
 

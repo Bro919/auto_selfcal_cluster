@@ -94,13 +94,14 @@ def copy_tree(src: Path, dst: Path) -> None:
     if not src.exists():
         raise FileNotFoundError(f"Source path not found: {src}")
     dst.mkdir(parents=True, exist_ok=True)
+    ignore_names = shutil.ignore_patterns(".git", ".hg", ".svn")
     for item in src.iterdir():
-        # Skip VCS metadata; it is not needed for runtime and can fail on shared filesystems.
+        # Skip top-level VCS metadata and recursively ignore it within copied trees.
         if item.name in {".git", ".hg", ".svn"}:
             continue
         dest_item = dst / item.name
         if item.is_dir():
-            shutil.copytree(str(item), str(dest_item))
+            shutil.copytree(str(item), str(dest_item), ignore=ignore_names)
         else:
             shutil.copy2(str(item), str(dest_item))
 

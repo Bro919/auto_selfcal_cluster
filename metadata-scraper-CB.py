@@ -44,50 +44,8 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
                 project_code = match.group(0)
                 break
 
-    date_candidate = None
-    target_candidate = None
-
-    for segment in segments:
-        parts = segment.split('.')
-        if len(parts) >= 3:
-            maybe_date = normalize_date_token(parts[-1])
-            if maybe_date:
-                date_candidate = maybe_date
-                if project_code is None and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parts[0]):
-                    project_code = parts[0]
-                if len(parts) >= 3:
-                    target_candidate = '.'.join(parts[1:-1])
-                break
-
-    if date_candidate is None:
-        for segment in segments:
-            maybe_date = normalize_date_token(segment)
-            if maybe_date:
-                date_candidate = maybe_date
-                break
-
-    if target_candidate is None and project_code and date_candidate:
-        for segment in segments:
-            if project_code in segment and date_candidate.replace('-', '') in segment:
-                parts = segment.split('.')
-                if len(parts) >= 3:
-                    target_candidate = '.'.join(parts[1:-1])
-                    break
-
-    if target_candidate is None:
-        parent_name = Path(ms_path).parent.name
-        if parent_name and parent_name != project_code and normalize_date_token(parent_name) is None:
-            target_candidate = parent_name
-
-    if date_candidate is None:
-        for segment in segments:
-            if "date" in segment.lower():
-                maybe_date = normalize_date_token(segment)
-                if maybe_date:
-                    date_candidate = maybe_date
-                    break
-
-    return project_code, target_candidate, date_candidate
+    # Do not infer object name or observation date from path names.
+    return project_code, None, None
 
 
 def parse_asdm_time(value):

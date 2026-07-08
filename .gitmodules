@@ -1,0 +1,3 @@
+[submodule "ASC/repo"]
+	path = ASC/repo
+	url = https://github.com/psheehan/auto_selfcal

@@ -18,9 +18,59 @@ def extract_tar_with_progress(tar_path, extract_path):
         print("\nExtraction complete.")
 import sys
 import urllib.request
-from datetime import date
+from datetime import date, datetime, timedelta
 import re
 import os
+
+def normalize_date_token(token):
+    token = str(token).strip()
+    if not token:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", token):
+        return token
+    m = re.match(r"^(\d{4})(\d{2})(\d{2})$", token)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.match(r"^(\d{5,6})(?:\.\d+)?$", token)
+    if m:
+        try:
+            mjd = float(token)
+        except ValueError:
+            return None
+        try:
+            return (datetime(1858, 11, 17) + timedelta(days=mjd)).date().isoformat()
+        except OverflowError:
+            return None
+    return None
+
+def infer_metadata_from_ms_path(ms_dir):
+    project_code = None
+    observation_date = None
+    ms_path = Path(ms_dir)
+    path_tokens = []
+    date_tokens = [ms_path.name] + ms_path.name.split('.')
+    observation_parts = [part for part in ms_path.parts if part.startswith('observation')]
+    for part in observation_parts:
+        date_tokens.append(part)
+        date_tokens.extend(part.split('.'))
+
+    for part in ms_path.parts:
+        path_tokens.append(part)
+        path_tokens.extend(part.split('.'))
+
+    for token in path_tokens:
+        if project_code is None:
+            match = re.search(r'[0-9]{2}[A-Z]-[0-9]{3}', token)
+            if match:
+                project_code = match.group(0)
+
+    for token in date_tokens:
+        if observation_date is None:
+            observation_date = normalize_date_token(token)
+        if project_code and observation_date:
+            break
+
+    return project_code, observation_date
 
 def download_progress(blocks, block_size, total_size):
     """Download progress bar"""
@@ -103,9 +153,12 @@ def main():
     # Create working directory
     workdir_path.mkdir(parents=True, exist_ok=True)
 
+    # Initialize extracted metadata variable
+    extracted_project_code = None
+    extracted_observation_date = None
+
     # --- Directory download approach first ---
     base_url = args.url.rstrip('/')
-    dir_url = f"{base_url}/{args.project_code}"
 
     def find_first_ms_dir(url, visited=None):
         """Recursively search for the first directory whose name ends with '.ms' and return
@@ -199,7 +252,16 @@ def main():
             return all_files
 
     # Try to find the first .ms directory and download only its contents when present
-    ms_info = find_first_ms_dir(dir_url)
+    # First, try the URL as-is (complete path scenario)
+    ms_info = find_first_ms_dir(base_url)
+    dir_url = base_url
+    
+    # If no results and project_code is not "unknown", try appending project_code (base URL scenario)
+    if not ms_info and args.project_code != "unknown":
+        dir_url = f"{base_url}/{args.project_code}"
+        print(f"No .ms directory found at {base_url}; trying with project code: {dir_url}")
+        ms_info = find_first_ms_dir(dir_url)
+    
     if ms_info:
         ms_rel_path, ms_url = ms_info
         print(f"Found .ms directory: {ms_rel_path}; downloading only its contents from {ms_url}")
@@ -240,10 +302,20 @@ def main():
                 ms_dirs.append(d)
             else:
                 ms_dirs.extend([p for p in d.rglob('*') if p.is_dir() and p.name.endswith('.ms')])
+        ms_dir = None
+        target_ms = None
+        extracted_project_code = None
         if ms_dirs:
             if len(ms_dirs) > 1:
                 print("Warning: Multiple .ms directories found; using the first one.")
             ms_dir = ms_dirs[0]
+            # Extract metadata from the path before moving/renaming the MS.
+            # e.g., temp_dir/24A-322/pipeline.../24A-322...60507.012.ms
+            extracted_project_code, extracted_observation_date = infer_metadata_from_ms_path(ms_dir)
+            if extracted_project_code:
+                print(f"Extracted project code from path: {extracted_project_code}")
+            if extracted_observation_date:
+                print(f"Extracted observation date from path: {extracted_observation_date}")
             target_ms = workdir_path / f"{workdir_name}.ms"
             if target_ms.exists():
                 if target_ms.is_dir():
@@ -255,7 +327,8 @@ def main():
             except Exception as e:
                 sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
         else:
-            print("No .ms directory found in downloaded content. Using downloaded structure as-is.")
+            print("No .ms directory found in downloaded content. The remote URL may not contain a measurement set.")
+            sys.exit("Error: No measurement set directory was found in the downloaded content. The remote URL may not contain an .ms or downloadable archive.")
         try:
             if temp_dir.exists():
                 shutil.rmtree(str(temp_dir))
@@ -326,6 +399,12 @@ def main():
             if len(ms_dirs) > 1:
                 print("Warning: Multiple .ms directories found; using the first one.")
             ms_dir = ms_dirs[0]
+            # Extract metadata from the path before moving/renaming the MS.
+            extracted_project_code, extracted_observation_date = infer_metadata_from_ms_path(ms_dir)
+            if extracted_project_code:
+                print(f"Extracted project code from path: {extracted_project_code}")
+            if extracted_observation_date:
+                print(f"Extracted observation date from path: {extracted_observation_date}")
             target_ms = workdir_path / f"{workdir_name}.ms"
             if target_ms.exists():
                 if target_ms.is_dir():
@@ -344,11 +423,7 @@ def main():
                     print(f"Warning: could not remove {extracted_dir}: {e}")
         else:
             print("No tar file found or extracted. Unable to proceed.")
-            
-            try:
-                shutil.move(str(ms_dir), str(target_ms))
-            except Exception as e:
-                sys.exit(f"Error: Failed to move .ms directory {ms_dir} to {target_ms}: {e}")
+            sys.exit("Error: No measurement set directory was found in the downloaded content. The remote URL may not contain an .ms or a downloadable tar archive.")
         # Clean up temp directory
         try:
             if 'temp_dir' in locals() and temp_dir.exists():
@@ -366,6 +441,21 @@ def main():
 
     print(f'Final working directory created at: {workdir_path.resolve()}')
     print("Process completed successfully.")
+
+    # Write extracted metadata to a file for use by run_build_and_prep_ASC.py
+    if extracted_project_code or extracted_observation_date:
+        metadata_file = workdir_path / ".extracted_metadata"
+        try:
+            with metadata_file.open("w") as f:
+                if extracted_project_code:
+                    f.write(f"project_code={extracted_project_code}\n")
+                if extracted_observation_date:
+                    f.write(f"observation_date={extracted_observation_date}\n")
+            print(f"Wrote extracted metadata to {metadata_file}")
+        except Exception as e:
+            print(f"Warning: Could not write extracted metadata file: {e}")
+    else:
+        print("Warning: No project code was extracted from the path")
 
     # --- Edit prep and clean scripts in working directory ---
     prep_script = workdir_path / "prep-ms-for-auto-selfcal.py"

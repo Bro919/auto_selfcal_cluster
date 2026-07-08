@@ -212,6 +212,31 @@ def split_ms(df_store, measurement_set_target):
 
     return freq_directories, split_ms_names
 
+
+def choose_split_datacolumn(vis):
+    """Pick a split datacolumn supported by the input MS."""
+    available_columns = set()
+
+    try:
+        from casatools import table as casatable
+
+        tb_local = casatable()
+        tb_local.open(vis)
+        available_columns = {name.upper() for name in tb_local.colnames()}
+        tb_local.close()
+    except Exception:
+        # Fall back to the safer default when column probing is unavailable.
+        return "data"
+
+    if "CORRECTED_DATA" in available_columns:
+        return "corrected"
+    if "DATA" in available_columns:
+        return "data"
+    if "FLOAT_DATA" in available_columns:
+        return "float_data"
+
+    raise RuntimeError(f"No supported split datacolumn found in {vis}; columns={sorted(available_columns)}")
+
 # where things are
 ms_directory = os.path.dirname(measurement_set)
 auto_sc_files_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "repo")
@@ -247,7 +272,9 @@ print(field)
 print(measurement_set_target)
 print(f"Splitting into _target.ms")
 if not os.path.exists(measurement_set_target):
-    split(vis=measurement_set, field=field, outputvis=measurement_set_target)
+    initial_datacolumn = choose_split_datacolumn(measurement_set)
+    print(f"Using datacolumn='{initial_datacolumn}' for initial target split")
+    split(vis=measurement_set, field=field, datacolumn=initial_datacolumn, outputvis=measurement_set_target)
 
 print(f"Splitting into {df_store.shape[0]} measurement sets")
 split_ms_directories, split_ms_paths = split_ms(df_store, measurement_set_target)

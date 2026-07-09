@@ -198,11 +198,17 @@ def download_files(
     temp_dir: Path,
     ms_found: bool,
     ms_rel_path: Optional[str],
+    fail_on_download_error: bool = True,
 ) -> None:
     total_files = len(all_files)
     print(f"Found {total_files} files to download")
+    failed_files: List[Tuple[Path, str]] = []
 
     for idx, (rel_path, file_url) in enumerate(all_files, 1):
+        # Keep the next file header readable after a carriage-return status line.
+        if idx > 1:
+            print()
+
         if ms_found and ms_rel_path:
             relative_path = Path(ms_rel_path) / Path(rel_path)
         else:
@@ -217,11 +223,23 @@ def download_files(
             print()
         except Exception as exc:
             print(f"Warning: Could not download {relative_path}: {exc}")
+            failed_files.append((relative_path, str(exc)))
+            if fail_on_download_error:
+                break
+            continue
 
         percent = min(idx / total_files * 100, 100)
         print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total_files} files)", end="", flush=True)
 
     print("\nDirectory download complete.")
+
+    if failed_files:
+        sample = ", ".join(str(path) for path, _ in failed_files[:5])
+        raise RuntimeError(
+            f"{len(failed_files)} file download(s) failed. "
+            f"Example failed paths: {sample}. "
+            "Use --allow-partial-download to continue on per-file failures."
+        )
 
 
 def find_ms_dirs_under(paths: Sequence[Path]) -> List[Path]:
@@ -443,6 +461,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--asc", type=str, default="ASC", help="ASC template directory (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Set A_config=True in prep script")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument(
+        "--allow-partial-download",
+        action="store_true",
+        help="Continue even if one or more files fail to download (not recommended for full MS runs)",
+    )
     return parser.parse_args()
 
 
@@ -481,7 +504,17 @@ def main() -> None:
 
     if all_files:
         temp_dir = workdir_path / "temp_download"
-        download_files(all_files, temp_dir, ms_found, ms_rel_path)
+        try:
+            download_files(
+                all_files,
+                temp_dir,
+                ms_found,
+                ms_rel_path,
+                fail_on_download_error=not args.allow_partial_download,
+            )
+        except RuntimeError as exc:
+            cleanup_paths([temp_dir], logger)
+            sys.exit(f"Error: {exc}")
 
         asc_name = Path(args.asc).name
         extracted_roots = [p for p in temp_dir.iterdir() if p.is_dir() and p.name != asc_name]

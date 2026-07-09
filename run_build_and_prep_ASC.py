@@ -61,6 +61,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--asc", default="ASC", help="ASC template directory or path (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Enable A_config in prep script")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Reduce non-critical output noise")
     parser.add_argument(
         "--allow-partial-download",
         action="store_true",
@@ -162,6 +163,7 @@ def run_checked(
     command: list,
     cwd: Optional[Path] = None,
     capture_output: bool = False,
+    suppress_output: bool = False,
     logger: Optional[logging.Logger] = None,
     description: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
@@ -170,8 +172,8 @@ def run_checked(
     if logger:
         logger.debug("Command: %s", " ".join(str(item) for item in command))
 
-    stdout_pipe = subprocess.PIPE if capture_output else None
-    stderr_pipe = subprocess.PIPE if capture_output else None
+    stdout_pipe = subprocess.PIPE if (capture_output or suppress_output) else None
+    stderr_pipe = subprocess.PIPE if (capture_output or suppress_output) else None
 
     try:
         result = subprocess.run(
@@ -184,6 +186,10 @@ def run_checked(
         )
     except subprocess.CalledProcessError as exc:
         context = description or "Command failed"
+        stderr_text = (exc.stderr or "").strip()
+        stderr_summary = stderr_text.splitlines()[-1] if stderr_text else ""
+        if stderr_summary:
+            raise RuntimeError(f"{context} (exit code {exc.returncode}): {stderr_summary}")
         raise RuntimeError(f"{context} (exit code {exc.returncode})")
     return result
 
@@ -541,6 +547,7 @@ def launch_casa_and_exec_prep(
     casa_executable: str,
     workdir: Path,
     skip_submit: bool,
+    quiet: bool,
     logger: logging.Logger,
 ) -> None:
     wrapper_script = write_casa_wrapper_script(workdir)
@@ -550,7 +557,15 @@ def launch_casa_and_exec_prep(
         "-c",
         f"exec(open('{wrapper_script.name}').read())",
     ]
-    run_checked(command, cwd=workdir, logger=logger, description="Launching CASA non-interactively")
+    run_checked(
+        command,
+        cwd=workdir,
+        suppress_output=quiet,
+        logger=logger,
+        description="Launching CASA non-interactively",
+    )
+    if quiet:
+        logger.info("CASA prep script execution completed")
 
     if skip_submit:
         logger.info("Skipping submit batch execution as requested")
@@ -563,6 +578,7 @@ def launch_casa_and_exec_prep(
     run_checked(
         [sys.executable, submit_script.name],
         cwd=workdir,
+        suppress_output=quiet,
         logger=logger,
         description=f"Submitting batch jobs using {submit_script.name}",
     )
@@ -614,10 +630,11 @@ def resolve_remote_metadata_from_ms(
 
     ms_metadata = {}
     if result.returncode != 0:
-        logger.warning(
-            "ASC metadata scraper did not resolve all metadata: %s",
-            result.stderr.strip() or f"return code {result.returncode}",
-        )
+        stderr_text = result.stderr.strip()
+        summary = stderr_text.splitlines()[-1] if stderr_text else f"return code {result.returncode}"
+        logger.warning("ASC metadata scraper did not resolve all metadata: %s", summary)
+        if stderr_text and logger.isEnabledFor(logging.DEBUG):
+            logger.debug("Full metadata scraper stderr:\n%s", stderr_text)
     else:
         try:
             ms_metadata = json.loads(result.stdout)
@@ -633,7 +650,12 @@ def resolve_remote_metadata_from_ms(
 
     if "object_name" in required_missing_metadata(args):
         try:
-            casa_object_name = extract_object_name_with_casa(args.casa_executable, workdir, ms_path)
+            casa_object_name = extract_object_name_with_casa(
+                args.casa_executable,
+                workdir,
+                ms_path,
+                quiet=args.quiet,
+            )
         except Exception as exc:
             logger.warning("CASA object-name extraction failed: %s", exc)
         else:
@@ -644,7 +666,12 @@ def resolve_remote_metadata_from_ms(
     return args
 
 
-def extract_object_name_with_casa(casa_executable: str, workdir: Path, ms_path: Path) -> Optional[str]:
+def extract_object_name_with_casa(
+    casa_executable: str,
+    workdir: Path,
+    ms_path: Path,
+    quiet: bool = False,
+) -> Optional[str]:
     script_path = workdir / "__extract_asc_object_name.py"
     output_path = workdir / ".casa_object_metadata.json"
     ms_argument = ms_path.name if ms_path.parent.resolve() == workdir.resolve() else str(ms_path.resolve())
@@ -699,7 +726,23 @@ with open(output_path, "w", encoding="utf-8") as handle:
         "-c",
         f"exec(open('{script_path.name}').read())",
     ]
-    subprocess.run(command, cwd=workdir, check=True)
+    stdout_pipe = subprocess.PIPE if quiet else None
+    stderr_pipe = subprocess.PIPE if quiet else None
+    try:
+        subprocess.run(
+            command,
+            cwd=workdir,
+            check=True,
+            stdout=stdout_pipe,
+            stderr=stderr_pipe,
+            universal_newlines=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr_text = (exc.stderr or "").strip()
+        stderr_summary = stderr_text.splitlines()[-1] if stderr_text else ""
+        if stderr_summary:
+            raise RuntimeError(f"CASA object-name extraction failed: {stderr_summary}")
+        raise
 
     try:
         metadata = json.loads(output_path.read_text(encoding="utf-8"))
@@ -741,7 +784,7 @@ def patch_and_optionally_run(
     logger.info("Workdir ready: %s", workdir.resolve())
 
     if args.run_casa:
-        launch_casa_and_exec_prep(args.casa_executable, workdir, args.skip_submit, logger)
+        launch_casa_and_exec_prep(args.casa_executable, workdir, args.skip_submit, args.quiet, logger)
     else:
         logger.info("CASA launch skipped (--no-run-casa)")
 
@@ -818,6 +861,8 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
         build_cmd.append("--verbose")
     if args.allow_partial_download:
         build_cmd.append("--allow-partial-download")
+    if args.quiet:
+        build_cmd.append("--quiet")
 
     logger.debug("Build command: %s", " ".join(build_cmd))
 

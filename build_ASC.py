@@ -10,8 +10,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 
-def configure_logging(verbose: bool) -> logging.Logger:
-    level = logging.DEBUG if verbose else logging.INFO
+def configure_logging(verbose: bool, quiet: bool = False) -> logging.Logger:
+    if quiet and not verbose:
+        level = logging.WARNING
+    else:
+        level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
     return logging.getLogger("build_ASC")
 
@@ -199,14 +202,16 @@ def download_files(
     ms_found: bool,
     ms_rel_path: Optional[str],
     fail_on_download_error: bool = True,
+    quiet: bool = False,
 ) -> None:
     total_files = len(all_files)
     print(f"Found {total_files} files to download")
     failed_files: List[Tuple[Path, str]] = []
+    completed = 0
 
     for idx, (rel_path, file_url) in enumerate(all_files, 1):
         # Keep the next file header readable after a carriage-return status line.
-        if idx > 1:
+        if idx > 1 and not quiet:
             print()
 
         if ms_found and ms_rel_path:
@@ -217,10 +222,12 @@ def download_files(
         file_path = temp_dir / relative_path
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        print(f"Downloading: {relative_path}")
+        if not quiet:
+            print(f"Downloading: {relative_path}")
         try:
             urllib.request.urlretrieve(file_url, str(file_path), reporthook=print_download_progress)
-            print()
+            if not quiet:
+                print()
         except Exception as exc:
             print(f"Warning: Could not download {relative_path}: {exc}")
             failed_files.append((relative_path, str(exc)))
@@ -228,10 +235,18 @@ def download_files(
                 break
             continue
 
+        completed += 1
         percent = min(idx / total_files * 100, 100)
-        print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total_files} files)", end="", flush=True)
+        if quiet:
+            if idx == total_files or idx % 10 == 0:
+                print(f"Directory progress: {percent:5.1f}% ({idx}/{total_files} files)")
+        else:
+            print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total_files} files)", end="", flush=True)
 
-    print("\nDirectory download complete.")
+    if quiet:
+        print(f"Directory download complete ({completed}/{total_files} files).")
+    else:
+        print("\nDirectory download complete.")
 
     if failed_files:
         sample = ", ".join(str(path) for path, _ in failed_files[:5])
@@ -528,6 +543,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--asc", type=str, default="ASC", help="ASC template directory (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Set A_config=True in prep script")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Reduce non-critical output noise")
     parser.add_argument(
         "--allow-partial-download",
         action="store_true",
@@ -538,7 +554,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = normalize_cli_inputs(parse_args())
-    logger = configure_logging(args.verbose)
+    logger = configure_logging(args.verbose, args.quiet)
 
     if not args.url:
         sys.exit(
@@ -587,6 +603,7 @@ def main() -> None:
                 ms_found,
                 ms_rel_path,
                 fail_on_download_error=not args.allow_partial_download,
+                quiet=args.quiet,
             )
         except RuntimeError as exc:
             cleanup_paths([temp_dir], logger)

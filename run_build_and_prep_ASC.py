@@ -473,6 +473,9 @@ def patch_prep_script(
             if re.match(pattern, line):
                 if key == "auto_sc_files_directory":
                     if auto_sc_dir is None:
+                        # Preserve existing default if no override was provided.
+                        updated_lines.append(line)
+                        found_keys.add(key)
                         replaced = True
                         break
                     replacement = f'auto_sc_files_directory = "{auto_sc_dir}"'

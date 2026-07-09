@@ -173,14 +173,18 @@ def run_checked(
     stdout_pipe = subprocess.PIPE if capture_output else None
     stderr_pipe = subprocess.PIPE if capture_output else None
 
-    result = subprocess.run(
-        command,
-        cwd=cwd,
-        check=True,
-        stdout=stdout_pipe,
-        stderr=stderr_pipe,
-        universal_newlines=True,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            check=True,
+            stdout=stdout_pipe,
+            stderr=stderr_pipe,
+            universal_newlines=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        context = description or "Command failed"
+        raise RuntimeError(f"{context} (exit code {exc.returncode})")
     return result
 
 
@@ -799,8 +803,9 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
         str(script_dir / "build_ASC.py"),
         build_project_code,
         build_object,
-        args.url,
         build_date,
+        "--url",
+        args.url,
         "--asc",
         args.asc,
     ]

@@ -5,7 +5,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 from urllib.parse import urlparse
@@ -15,10 +14,6 @@ def configure_logging(verbose: bool) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
     return logging.getLogger("run_build_and_prep_ASC")
-
-
-def log_step(logger: logging.Logger, current: int, total: int, message: str) -> None:
-    logger.info("[Step %d/%d] %s", current, total, message)
 
 
 def log_metadata_summary(
@@ -136,9 +131,26 @@ def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
 
     for attr in ("project_code", "object_name", "observation_date"):
         value = getattr(args, attr)
-        if value and isinstance(value, str) and value.startswith("url=") and not args.url:
-            args.url = value.split("=", 1)[1]
+        if value and isinstance(value, str) and value.startswith("url="):
+            extracted_url = value.split("=", 1)[1].strip()
+            if extracted_url and not args.url:
+                args.url = extracted_url
             setattr(args, attr, None)
+
+    # Handle split form: "url= https://..." where url= occupies one positional slot.
+    if args.url in (None, ""):
+        positional_url = None
+        for attr in ("project_code", "object_name", "observation_date", "url_arg"):
+            value = getattr(args, attr, None)
+            if value and isinstance(value, str) and value.lower() == "url=":
+                setattr(args, attr, None)
+                continue
+            if value and isinstance(value, str) and value.startswith(("http://", "https://")):
+                positional_url = value
+                setattr(args, attr, None)
+                break
+        if positional_url:
+            args.url = positional_url
 
     if not args.url and args.url_arg:
         args.url = args.url_arg.split("=", 1)[1] if args.url_arg.startswith("url=") else args.url_arg
@@ -153,22 +165,22 @@ def run_checked(
     logger: Optional[logging.Logger] = None,
     description: Optional[str] = None,
 ) -> subprocess.CompletedProcess:
-    start = time.perf_counter()
     if logger and description:
         logger.info("%s", description)
     if logger:
         logger.debug("Command: %s", " ".join(str(item) for item in command))
 
+    stdout_pipe = subprocess.PIPE if capture_output else None
+    stderr_pipe = subprocess.PIPE if capture_output else None
+
     result = subprocess.run(
         command,
         cwd=cwd,
         check=True,
-        text=True,
-        capture_output=capture_output,
+        stdout=stdout_pipe,
+        stderr=stderr_pipe,
+        universal_newlines=True,
     )
-    if logger:
-        elapsed = time.perf_counter() - start
-        logger.debug("Command finished in %.2fs", elapsed)
     return result
 
 
@@ -303,7 +315,13 @@ def scrape_local_metadata(
     if project_code:
         command.extend(["--project-code", project_code])
 
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+    )
     if logger:
         logger.debug("Metadata scraper command: %s", " ".join(command))
 
@@ -578,7 +596,14 @@ def resolve_remote_metadata_from_ms(
         ms_command.extend(["--project-code", args.project_code])
 
     logger.info("Inferring ASC metadata from %s", metadata_script.name)
-    result = subprocess.run(ms_command, cwd=script_dir, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        ms_command,
+        cwd=script_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+    )
 
     ms_metadata = {}
     if result.returncode != 0:
@@ -715,9 +740,8 @@ def patch_and_optionally_run(
 
 
 def run_local_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
-    total_steps = 4
     ms_input = Path(args.ms_path).expanduser()
-    log_step(logger, 1, total_steps, f"Local mode selected with input {ms_input}")
+    logger.info("Local mode selected with input %s", ms_input)
     metadata_missing = required_missing_metadata(args)
     if metadata_missing:
         raise RuntimeError(
@@ -732,11 +756,11 @@ def run_local_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
     log_metadata_summary(logger, build_project_code, build_object, build_date)
 
     if args.dry_run:
-        log_step(logger, 2, total_steps, "Dry run: skipping local workdir creation")
+        logger.info("Dry run: skipping local workdir creation")
         logger.info("Planned workdir: %s", workdir)
         return
 
-    log_step(logger, 2, total_steps, "Creating workdir from local measurement set")
+    logger.info("Creating workdir from local measurement set")
     ms_path = prepare_workdir_from_local_input(
         ms_input,
         workdir,
@@ -747,17 +771,16 @@ def run_local_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
     )
 
     source_name = args.source_name or build_object
-    log_step(logger, 3, total_steps, "Patching prep script and preparing execution")
+    logger.info("Patching prep script and preparing execution")
     patch_and_optionally_run(args, workdir, ms_path.name, source_name, logger)
-    log_step(logger, 4, total_steps, "Local mode completed successfully")
+    logger.info("Local mode completed successfully")
 
 
 def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
-    total_steps = 6
     if not args.url:
         raise RuntimeError("URL is required for remote mode")
 
-    log_step(logger, 1, total_steps, "Remote mode selected")
+    logger.info("Remote mode selected")
     url_project_code = extract_project_code_from_url(args.url)
     if url_project_code and is_missing_metadata_value(args.project_code):
         logger.info("Extracted project code from URL path: %s", url_project_code)
@@ -791,14 +814,14 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
     logger.debug("Build command: %s", " ".join(build_cmd))
 
     if args.dry_run:
-        log_step(logger, 2, total_steps, "Dry run: skipping build_ASC execution")
+        logger.info("Dry run: skipping build_ASC execution")
         logger.info("Planned workdir: %s", workdir)
         return
 
-    log_step(logger, 2, total_steps, "Running build_ASC.py")
+    logger.info("Running build_ASC.py")
     run_checked(build_cmd, cwd=script_dir, logger=logger, description="Launching build helper")
 
-    log_step(logger, 3, total_steps, "Locating measurement set in workdir")
+    logger.info("Locating measurement set in workdir")
     ms_path = find_ms_directory(workdir)
     if ms_path is None:
         raise RuntimeError(f"No .ms directory found in workdir {workdir}")
@@ -811,7 +834,7 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
         logger=logger,
     )
 
-    log_step(logger, 4, total_steps, "Resolving missing metadata from measurement set")
+    logger.info("Resolving missing metadata from measurement set")
     args = resolve_remote_metadata_from_ms(args, script_dir, workdir, ms_path, logger)
 
     metadata_missing = required_missing_metadata(args)
@@ -826,7 +849,7 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
     args.observation_date = str(args.observation_date)
     log_metadata_summary(logger, args.project_code, args.object_name, args.observation_date)
 
-    log_step(logger, 5, total_steps, "Finalizing workdir and measurement set names")
+    logger.info("Finalizing workdir and measurement set names")
     workdir, ms_path = rename_workdir_and_measurement_set(
         workdir,
         args.project_code,
@@ -840,7 +863,7 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
         ms_path = ms_path.rename(workdir / measurement_set_name)
 
     source_name = args.source_name or args.object_name
-    log_step(logger, 6, total_steps, "Patching prep script and running requested actions")
+    logger.info("Patching prep script and running requested actions")
     patch_and_optionally_run(args, workdir, measurement_set_name, source_name, logger)
 
 

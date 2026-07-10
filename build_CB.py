@@ -7,7 +7,7 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path
-from typing import List, Optional, Sequence, Set, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 
 def configure_logging(verbose: bool, quiet: bool = False) -> logging.Logger:
@@ -283,15 +283,90 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create a CB working directory from a remote or local observation dataset."
     )
-    parser.add_argument("project_code", type=str, help="Project code, e.g. 23A-241")
-    parser.add_argument("object_name", type=str, help="Object name, e.g. AT2019ehz")
-    parser.add_argument("url", type=str, help="URL or local path to the tar file or directory")
-    parser.add_argument("observation_date", type=str, help="Observation date, e.g. 2023-07-22")
+    parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
+    parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
+    parser.add_argument("observation_date", nargs="?", help="Observation date, e.g. 2023-07-22")
+    parser.add_argument(
+        "url_arg",
+        nargs="?",
+        help="Optional URL/path argument, either raw value or url=<value> after positional args",
+    )
+    parser.add_argument("--url", help="URL or local path to tar file/directory")
     parser.add_argument("--cb", type=str, default="CB", help="Path to the CB template directory")
     parser.add_argument("--temp-dir", type=str, default=None, help="Directory for temporary downloads/extraction")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce non-critical output noise")
     return parser.parse_args()
+
+
+def parse_named_inputs(inputs: Sequence[str]) -> Tuple[Dict[str, str], List[str]]:
+    named_inputs: Dict[str, str] = {}
+    positional_inputs: List[str] = []
+    for token in inputs:
+        if "=" in token and not token.startswith("--"):
+            key, value = token.split("=", 1)
+            named_inputs[key.strip()] = value.strip()
+        else:
+            positional_inputs.append(token)
+    return named_inputs, positional_inputs
+
+
+def _looks_like_date(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}$", value))
+
+
+def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
+    named_inputs, _ = parse_named_inputs(sys.argv[1:])
+
+    if named_inputs.get("project_code") and not args.project_code:
+        args.project_code = named_inputs["project_code"]
+    if named_inputs.get("object_name") and not args.object_name:
+        args.object_name = named_inputs["object_name"]
+    if named_inputs.get("observation_date") and not args.observation_date:
+        args.observation_date = named_inputs["observation_date"]
+    if named_inputs.get("url") and not args.url:
+        args.url = named_inputs["url"]
+
+    for attr in ("project_code", "object_name", "observation_date"):
+        value = getattr(args, attr)
+        if value and isinstance(value, str) and value.startswith("url="):
+            extracted_url = value.split("=", 1)[1].strip()
+            if extracted_url and not args.url:
+                args.url = extracted_url
+            setattr(args, attr, None)
+
+    # Handle split form: "url= /path/or/url".
+    if args.url in (None, ""):
+        saw_url_marker = False
+        for attr in ("project_code", "object_name", "observation_date", "url_arg"):
+            value = getattr(args, attr, None)
+            if not value or not isinstance(value, str):
+                continue
+            if value.lower() == "url=":
+                saw_url_marker = True
+                setattr(args, attr, None)
+                continue
+            if saw_url_marker:
+                args.url = value
+                setattr(args, attr, None)
+                break
+
+    # Backward compatibility: old order was project object url observation_date.
+    if args.url in (None, "") and args.observation_date and args.url_arg:
+        if not _looks_like_date(args.observation_date) and _looks_like_date(args.url_arg):
+            args.url = args.observation_date
+            args.observation_date = args.url_arg
+            args.url_arg = None
+
+    if not args.url and args.url_arg:
+        if str(args.url_arg).startswith("url="):
+            args.url = str(args.url_arg).split("=", 1)[1]
+        else:
+            args.url = args.url_arg
+
+    return args
 
 
 def resolve_observation_dir_from_local_input(input_path: Path, temp_dir: Path) -> Path:
@@ -376,8 +451,24 @@ def stage_observation_contents(downloaded_dir: Path, workdir_path: Path) -> str:
 
 
 def main() -> None:
-    args = parse_args()
+    args = normalize_cli_inputs(parse_args())
     logger = configure_logging(args.verbose, args.quiet)
+
+    missing = []
+    if not args.project_code:
+        missing.append("project_code")
+    if not args.object_name:
+        missing.append("object_name")
+    if not args.observation_date:
+        missing.append("observation_date")
+    if not args.url:
+        missing.append("url")
+    if missing:
+        sys.exit(
+            "Usage error: missing required values: "
+            + ", ".join(missing)
+            + ". Provide project_code object_name observation_date URL/PATH, or use named inputs (e.g., url=...)."
+        )
 
     workdir_name = f"working.{args.project_code}.{args.object_name}.{args.observation_date}"
     workdir_path = Path(workdir_name)

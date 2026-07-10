@@ -30,18 +30,18 @@ def parse_args() -> argparse.Namespace:
             "and optionally submit the job via sbatch."
         )
     )
+    parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
+    parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
+    parser.add_argument("observation_date", nargs="?", help="Observation date, e.g. 2023-07-22")
     parser.add_argument(
-        "inputs",
-        nargs="*",
-        help=(
-            "Optional positional values. Provide four values as "
-            "project_code object_name url observation_date, or provide a single "
-            "source path/URL to let metadata-scraper-CB.py infer metadata."
-        ),
+        "url_arg",
+        nargs="?",
+        help="Optional URL/path argument, either raw value or url=<value> after positional args",
     )
+    parser.add_argument("--url", help="URL or local path to source dataset")
     parser.add_argument(
         "--source",
-        help="Optional local path or URL to use when metadata should be inferred automatically.",
+        help="Alias for --url; local path or URL used for metadata inference when needed.",
     )
     parser.add_argument("--cb", default="CB", help="Path to CB template directory (default: CB)")
     parser.add_argument("--temp-dir", help="Optional temporary directory for downloads and extraction")
@@ -88,44 +88,96 @@ def parse_named_inputs(inputs: List[str]) -> Tuple[Dict[str, str], List[str]]:
     return named_inputs, positional_inputs
 
 
+def _looks_like_date(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", str(value)):
+        return True
+    return bool(re.match(r"^\d{5,6}(?:\.\d+)?$", str(value)))
+
+
+def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
+    named_inputs, _ = parse_named_inputs(sys.argv[1:])
+
+    if named_inputs.get("project_code") and not args.project_code:
+        args.project_code = named_inputs["project_code"]
+    if named_inputs.get("object_name") and not args.object_name:
+        args.object_name = named_inputs["object_name"]
+    if named_inputs.get("observation_date") and not args.observation_date:
+        args.observation_date = named_inputs["observation_date"]
+    if named_inputs.get("url") and not args.url:
+        args.url = named_inputs["url"]
+    if named_inputs.get("source") and not args.source:
+        args.source = named_inputs["source"]
+
+    for attr in ("project_code", "object_name", "observation_date"):
+        value = getattr(args, attr)
+        if value and isinstance(value, str) and value.startswith("url="):
+            extracted_url = value.split("=", 1)[1].strip()
+            if extracted_url and not args.url:
+                args.url = extracted_url
+            setattr(args, attr, None)
+
+    # Handle split form: "url= /path/or/url".
+    if args.url in (None, ""):
+        saw_url_marker = False
+        for attr in ("project_code", "object_name", "observation_date", "url_arg"):
+            value = getattr(args, attr, None)
+            if not value or not isinstance(value, str):
+                continue
+            if value.lower() == "url=":
+                saw_url_marker = True
+                setattr(args, attr, None)
+                continue
+            if saw_url_marker:
+                args.url = value
+                setattr(args, attr, None)
+                break
+
+    # Backward compatibility: old order was project object url observation_date.
+    if args.url in (None, "") and args.observation_date and args.url_arg:
+        if not _looks_like_date(args.observation_date) and _looks_like_date(args.url_arg):
+            args.url = args.observation_date
+            args.observation_date = args.url_arg
+            args.url_arg = None
+
+    if not args.url and args.url_arg:
+        if str(args.url_arg).startswith("url="):
+            args.url = str(args.url_arg).split("=", 1)[1]
+        else:
+            args.url = args.url_arg
+
+    # Backward compatibility with old single-source positional form.
+    if (
+        args.project_code
+        and not args.object_name
+        and not args.observation_date
+        and not args.url_arg
+        and not args.url
+        and not named_inputs.get("project_code")
+    ):
+        args.url = args.project_code
+        args.source = args.source or args.project_code
+        args.project_code = None
+
+    if args.source and not args.url:
+        args.url = args.source
+    if args.url and not args.source:
+        args.source = args.url
+
+    return args
+
+
 def collect_resolved_inputs(
     args: argparse.Namespace,
     named_inputs: Optional[Dict[str, str]] = None,
     positional_inputs: Optional[List[str]] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    if named_inputs is None or positional_inputs is None:
-        named_inputs, positional_inputs = parse_named_inputs(args.inputs)
-
-    project_code = named_inputs.get("project_code") or named_inputs.get("projectCode")
-    object_name = named_inputs.get("object_name") or named_inputs.get("objectName")
-    observation_date = named_inputs.get("observation_date") or named_inputs.get("observationDate")
-    url = named_inputs.get("url")
-    source = named_inputs.get("source") or args.source
-
-    # Explicit 4-position form: project object url date
-    if len(positional_inputs) >= 4:
-        project_code = positional_inputs[0]
-        object_name = positional_inputs[1]
-        url = positional_inputs[2]
-        observation_date = positional_inputs[3]
-    elif len(positional_inputs) == 1:
-        # Single positional input interpreted as source/url for metadata inference.
-        source = positional_inputs[0]
-        url = positional_inputs[0]
-    elif len(positional_inputs) == 2 and positional_inputs[0].lower() == "url=":
-        # Split token form: url= https://...
-        url = positional_inputs[1]
-        source = positional_inputs[1]
-    elif source:
-        url = url or source
-    elif url:
-        pass
-    else:
-        raise ValueError(
-            "Provide either four values (project_code object_name url observation_date), "
-            "a single source path/URL, or use --source."
-        )
-
+    del named_inputs, positional_inputs
+    project_code = args.project_code
+    object_name = args.object_name
+    observation_date = args.observation_date
+    url = args.url or args.source
     return project_code, object_name, url, observation_date
 
 
@@ -238,8 +290,8 @@ def infer_metadata_from_remote_url(url: str, logger: logging.Logger) -> dict:
         obs_info = find_first_observation_dir(url)
         observation_dir_url = obs_info[1] if obs_info else None
         if obs_info and project_code is None:
-            obs_parsed = urlparse(observation_dir_url)
-            obs_parts = [part for part in obs_parsed.path.split("/") if part]
+            obs_parsed = urlparse(str(observation_dir_url))
+            obs_parts = [str(part) for part in str(obs_parsed.path).split("/") if part]
             for part in obs_parts:
                 if re.match(r"^\d{2}[A-Z]-\d{3}$", part):
                     project_code = part
@@ -376,19 +428,15 @@ def run_submit(workdir: Path, args: argparse.Namespace, logger: logging.Logger) 
 
 
 def main() -> None:
-    args = parse_args()
+    args = normalize_cli_inputs(parse_args())
     logger = configure_logging(args.verbose)
     logger.info("Starting CB build+prep runner")
 
     script_dir = Path(__file__).resolve().parent
-    named_inputs, positional_inputs = parse_named_inputs(args.inputs)
-    if args.source:
-        named_inputs.setdefault("source", args.source)
-
-    project_code, object_name, url, observation_date = collect_resolved_inputs(args, named_inputs, positional_inputs)
+    project_code, object_name, url, observation_date = collect_resolved_inputs(args)
 
     if not project_code or not object_name or not observation_date:
-        source_value = url or named_inputs.get("source") or args.source
+        source_value = args.source or url
         if not source_value:
             raise ValueError("A source path/URL is required when metadata values are not supplied explicitly.")
 

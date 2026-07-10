@@ -10,8 +10,11 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Set, Tuple
 
 
-def configure_logging(verbose: bool) -> logging.Logger:
-    level = logging.DEBUG if verbose else logging.INFO
+def configure_logging(verbose: bool, quiet: bool = False) -> logging.Logger:
+    if quiet and not verbose:
+        level = logging.WARNING
+    else:
+        level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
     return logging.getLogger("build_CB")
 
@@ -215,27 +218,43 @@ def find_observation_subdir_in_path(root_path: Path) -> Optional[Path]:
     return None
 
 
-def download_directory(directory_url: str, target_dir: Path, logger: Optional[logging.Logger] = None) -> None:
+def download_directory(
+    directory_url: str,
+    target_dir: Path,
+    logger: Optional[logging.Logger] = None,
+    quiet: bool = False,
+) -> None:
     file_list = get_all_files_from_directory(directory_url, base_url=directory_url, logger=logger)
     if not file_list:
         raise RuntimeError(f"No files found for directory download at {directory_url}")
 
     total = len(file_list)
     print(f"Found {total} files to download")
+    completed = 0
     for idx, (relative_path, file_url) in enumerate(file_list, start=1):
         destination = target_dir / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
 
-        if idx > 1:
+        if idx > 1 and not quiet:
             print()
-        print(f"Downloading: {relative_path}")
+        if not quiet:
+            print(f"Downloading: {relative_path}")
         urllib.request.urlretrieve(file_url, str(destination), reporthook=download_progress)
-        print()
+        if not quiet:
+            print()
 
+        completed += 1
         percent = min(idx / total * 100, 100)
-        print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total} files)", end="", flush=True)
+        if quiet:
+            if idx == total or idx % 10 == 0:
+                print(f"Directory progress: {percent:5.1f}% ({idx}/{total} files)")
+        else:
+            print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total} files)", end="", flush=True)
 
-    print("\nDirectory download complete.")
+    if quiet:
+        print(f"Directory download complete ({completed}/{total} files).")
+    else:
+        print("\nDirectory download complete.")
 
 
 def update_casa_import_block(script_path: Path, observation_dir_name: str) -> None:
@@ -271,6 +290,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cb", type=str, default="CB", help="Path to the CB template directory")
     parser.add_argument("--temp-dir", type=str, default=None, help="Directory for temporary downloads/extraction")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Reduce non-critical output noise")
     return parser.parse_args()
 
 
@@ -300,7 +320,7 @@ def resolve_observation_dir_from_local_input(input_path: Path, temp_dir: Path) -
     raise RuntimeError(f"Input path is neither a file nor a directory: {input_path}")
 
 
-def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: logging.Logger) -> Path:
+def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: logging.Logger, quiet: bool = False) -> Path:
     if is_tar_url(url):
         tar_name = Path(url).name or "remote.tar"
         tar_path = temp_dir / tar_name
@@ -327,7 +347,7 @@ def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: loggin
         logger.info("Found observation directory: %s", observation_dir_name)
         downloaded_root = temp_dir / observation_dir_name
         downloaded_root.mkdir(parents=True, exist_ok=True)
-        download_directory(obs_url, downloaded_root, logger=logger)
+        download_directory(obs_url, downloaded_root, logger=logger, quiet=quiet)
         return downloaded_root
 
     raise RuntimeError(
@@ -357,7 +377,7 @@ def stage_observation_contents(downloaded_dir: Path, workdir_path: Path) -> str:
 
 def main() -> None:
     args = parse_args()
-    logger = configure_logging(args.verbose)
+    logger = configure_logging(args.verbose, args.quiet)
 
     workdir_name = f"working.{args.project_code}.{args.object_name}.{args.observation_date}"
     workdir_path = Path(workdir_name)
@@ -387,7 +407,7 @@ def main() -> None:
                 downloaded_dir = resolve_observation_dir_from_local_input(input_path, temp_dir)
             else:
                 logger.info("Using remote input URL: %s", args.url)
-                downloaded_dir = resolve_observation_dir_from_remote(args.url, temp_dir, logger)
+                downloaded_dir = resolve_observation_dir_from_remote(args.url, temp_dir, logger, quiet=args.quiet)
         except Exception as exc:
             sys.exit(f"Error: {exc}")
 

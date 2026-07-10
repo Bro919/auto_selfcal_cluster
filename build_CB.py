@@ -239,10 +239,7 @@ def download_directory(
             print()
         if not quiet:
             print(f"Downloading: {relative_path}")
-        if quiet:
-            urllib.request.urlretrieve(file_url, str(destination))
-        else:
-            urllib.request.urlretrieve(file_url, str(destination), reporthook=download_progress)
+        urllib.request.urlretrieve(file_url, str(destination), reporthook=download_progress)
         if not quiet:
             print()
 
@@ -403,10 +400,7 @@ def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: loggin
         tar_name = Path(url).name or "remote.tar"
         tar_path = temp_dir / tar_name
         print(f"Downloading tar file from {url}")
-        if quiet:
-            urllib.request.urlretrieve(url, str(tar_path))
-        else:
-            urllib.request.urlretrieve(url, str(tar_path), reporthook=download_progress)
+        urllib.request.urlretrieve(url, str(tar_path), reporthook=download_progress)
         print("\nDownload complete.")
 
         if not tarfile.is_tarfile(str(tar_path)):

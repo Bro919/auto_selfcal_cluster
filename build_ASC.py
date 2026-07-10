@@ -225,7 +225,10 @@ def download_files(
         if not quiet:
             print(f"Downloading: {relative_path}")
         try:
-            urllib.request.urlretrieve(file_url, str(file_path), reporthook=print_download_progress)
+            if quiet:
+                urllib.request.urlretrieve(file_url, str(file_path))
+            else:
+                urllib.request.urlretrieve(file_url, str(file_path), reporthook=print_download_progress)
             if not quiet:
                 print()
         except Exception as exc:
@@ -313,7 +316,7 @@ def cleanup_paths(paths: Sequence[Path], logger: logging.Logger) -> None:
             logger.warning("Could not remove %s: %s", path, exc)
 
 
-def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger) -> Optional[Path]:
+def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger, quiet: bool = False) -> Optional[Path]:
     cwd_tar_files = sorted(Path.cwd().glob("*.tar*"))
     if cwd_tar_files:
         source_tar = cwd_tar_files[0]
@@ -338,7 +341,10 @@ def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger) -> O
             print(f"Found tar file: {tar_file}")
             print(f"Downloading {full_url}")
             tar_path = workdir_path / Path(tar_file).name
-            urllib.request.urlretrieve(full_url, str(tar_path), reporthook=print_download_progress)
+            if quiet:
+                urllib.request.urlretrieve(full_url, str(tar_path))
+            else:
+                urllib.request.urlretrieve(full_url, str(tar_path), reporthook=print_download_progress)
             print("\nDownload complete.")
             return tar_path
         except Exception as exc:
@@ -349,7 +355,10 @@ def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger) -> O
     tar_path = workdir_path / tar_name
     print(f"Downloading {url}")
     try:
-        urllib.request.urlretrieve(url, str(tar_path), reporthook=print_download_progress)
+        if quiet:
+            urllib.request.urlretrieve(url, str(tar_path))
+        else:
+            urllib.request.urlretrieve(url, str(tar_path), reporthook=print_download_progress)
     except Exception as exc:
         logger.error("Could not download tar file from %s: %s", url, exc)
         return None
@@ -628,7 +637,7 @@ def main() -> None:
         cleanup_paths([temp_dir], logger)
     else:
         logger.info("No files found via directory download; attempting tar fallback.")
-        tar_path = choose_tar_source(args.url, workdir_path, logger)
+        tar_path = choose_tar_source(args.url, workdir_path, logger, quiet=args.quiet)
         if not tar_path or not tar_path.exists():
             sys.exit(
                 "Error: No measurement set directory was found in the downloaded content. "

@@ -1,45 +1,54 @@
 import argparse
-from pathlib import Path
+import logging
+import re
 import shutil
 import sys
 import tarfile
 import tempfile
 import urllib.request
-import urllib.error
-import re
+from pathlib import Path
+from typing import List, Optional, Sequence, Set, Tuple
 
-def download_progress(blocks, block_size, total_size):
-    """Download progress bar"""
+
+def configure_logging(verbose: bool) -> logging.Logger:
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
+    return logging.getLogger("build_CB")
+
+
+def download_progress(blocks: int, block_size: int, total_size: int) -> None:
     if total_size <= 0:
         return
+
     downloaded = blocks * block_size
-    percent = min(downloaded / total_size * 100, 100)\
-        
+    percent = min(downloaded / total_size * 100, 100)
     mb_done = downloaded / (1024 * 1024)
     mb_total = total_size / (1024 * 1024)
 
     print(
         f"\rDownloading: {percent:5.1f}% ({mb_done:6.1f} MB / {mb_total:.1f} MB)",
-        end='',
-        flush=True
+        end="",
+        flush=True,
     )
 
-def extract_tar_with_progress(tar_path, extract_path):
+
+def extract_tar_with_progress(tar_path: Path, extract_path: Path) -> None:
     with tarfile.open(str(tar_path), "r:*") as tar:
         members = tar.getmembers()
         total = len(members)
         if total == 0:
             print("No files to extract.")
             return
+
         print(f"Extracting {total} files from {tar_path}...")
-        for i, member in enumerate(members, 1):
+        for index, member in enumerate(members, 1):
             tar.extract(member, path=extract_path)
-            percent = min(i / total * 100, 100)
-            print(f"\rExtracting: {percent:5.1f}% ({i}/{total})", end='', flush=True)
+            percent = min(index / total * 100, 100)
+            print(f"\rExtracting: {percent:5.1f}% ({index}/{total})", end="", flush=True)
         print("\nExtraction complete.")
 
 
-def copy_tree(src, dst):
+def copy_tree(src: Path, dst: Path) -> None:
     src = Path(src)
     dst = Path(dst)
 
@@ -47,17 +56,16 @@ def copy_tree(src, dst):
         print(f"Skipping copy because source and destination are the same: {src}")
         return
 
-    if not dst.exists():
-        dst.mkdir(parents=True, exist_ok=True)
+    dst.mkdir(parents=True, exist_ok=True)
+    ignore_names = shutil.ignore_patterns(".git", ".hg", ".svn", "*.lock")
 
     for item in src.iterdir():
-        src_item = src / item.name
-        dst_item = dst / item.name
-
-        if src_item.resolve() == dst_item.resolve():
+        if item.name in {".git", ".hg", ".svn"}:
             continue
 
-        if src_item.name == '.git' or src_item.name.startswith('.git'):
+        src_item = src / item.name
+        dst_item = dst / item.name
+        if src_item.resolve() == dst_item.resolve():
             continue
 
         try:
@@ -67,34 +75,63 @@ def copy_tree(src, dst):
                 shutil.copytree(
                     str(src_item),
                     str(dst_item),
-                    ignore=shutil.ignore_patterns('.git', '*.lock'),
+                    ignore=ignore_names,
                     ignore_dangling_symlinks=True,
                 )
             else:
                 shutil.copy2(str(src_item), str(dst_item))
-        except PermissionError as e:
-            print(f"Warning: Permission error copying {src_item} -> {dst_item}: {e}")
-        except shutil.Error as e:
-            print(f"Warning: Error copying {src_item} -> {dst_item}: {e}")
-        except Exception as e:
-            print(f"Warning: Unexpected error copying {src_item} -> {dst_item}: {e}")
+        except PermissionError as exc:
+            print(f"Warning: Permission error copying {src_item} -> {dst_item}: {exc}")
+        except shutil.Error as exc:
+            print(f"Warning: Error copying {src_item} -> {dst_item}: {exc}")
+        except Exception as exc:
+            print(f"Warning: Unexpected error copying {src_item} -> {dst_item}: {exc}")
 
 
-def is_tar_url(url):
+def is_tar_url(url: str) -> bool:
     lower = url.lower()
-    return any(lower.endswith(ext) for ext in ['.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tar.xz'])
+    return any(lower.endswith(ext) for ext in (".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tar.xz"))
 
 
-def safe_remove(path):
+def safe_remove(path: Path) -> None:
     path = Path(path)
     try:
-        if path.exists():
+        if path.exists() and path.is_file():
             path.unlink()
-    except Exception as e:
-        print(f"Warning: Could not remove temporary file {path}: {e}")
+    except Exception as exc:
+        print(f"Warning: Could not remove temporary file {path}: {exc}")
 
 
-def find_first_observation_dir(url, visited=None):
+def parse_directory_links(html: str) -> List[str]:
+    links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
+    unique_links = sorted(set(links))
+
+    valid_links = []
+    for link in unique_links:
+        if link in {"../", "./", "..", ".", ""}:
+            continue
+        if link.startswith("/"):
+            continue
+        if "?C=" in link:
+            continue
+        valid_links.append(link)
+
+    return valid_links
+
+
+def fetch_directory_links(url: str, logger: Optional[logging.Logger] = None) -> List[str]:
+    if logger:
+        logger.debug("Scanning directory listing: %s", url)
+    with urllib.request.urlopen(url) as response:
+        html = response.read().decode("utf-8", errors="ignore")
+    return parse_directory_links(html)
+
+
+def find_first_observation_dir(
+    url: str,
+    visited: Optional[Set[str]] = None,
+    logger: Optional[logging.Logger] = None,
+) -> Optional[Tuple[str, str]]:
     if visited is None:
         visited = set()
     if url in visited:
@@ -102,142 +139,225 @@ def find_first_observation_dir(url, visited=None):
     visited.add(url)
 
     try:
-        with urllib.request.urlopen(url) as response:
-            html = response.read().decode('utf-8', errors='ignore')
-            links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
-            links = list(dict.fromkeys(links))
+        valid_links = fetch_directory_links(url, logger=logger)
 
-            valid_links = []
-            for link in links:
-                if link in ['../', './', '..', '.', '']:
-                    continue
-                if link.startswith('/'):
-                    continue
-                if '?C=' in link:
-                    continue
-                valid_links.append(link)
+        for link in valid_links:
+            if link.endswith("/") and link.rstrip("/").startswith("observation"):
+                obs_rel = link.rstrip("/")
+                obs_url = url.rstrip("/") + "/" + link.lstrip("/")
+                return obs_rel, obs_url
 
-            for link in valid_links:
-                if link.endswith('/') and link.rstrip('/').startswith('observation'):
-                    obs_rel = link.rstrip('/')
-                    obs_url = url.rstrip('/') + '/' + link.lstrip('/')
-                    return (obs_rel, obs_url)
+        for link in valid_links:
+            if not link.endswith("/"):
+                continue
+            sub_url = url.rstrip("/") + "/" + link.lstrip("/")
+            result = find_first_observation_dir(sub_url, visited, logger=logger)
+            if result:
+                sub_rel, obs_url = result
+                return link.rstrip("/") + "/" + sub_rel, obs_url
+    except Exception as exc:
+        print(f"Warning: Error scanning directory {url} for observation subdirectories: {exc}")
 
-            for link in valid_links:
-                if link.endswith('/'):
-                    sub_url = url.rstrip('/') + '/' + link.lstrip('/')
-                    result = find_first_observation_dir(sub_url, visited)
-                    if result:
-                        sub_rel, obs_url = result
-                        combined_rel = link.rstrip('/') + '/' + sub_rel
-                        return (combined_rel, obs_url)
-    except Exception as e:
-        print(f"Warning: Error scanning directory {url} for observation subdirectories: {e}")
     return None
 
 
-def get_all_files_from_directory(url, base_url=None, all_files=None, visited=None):
+def get_all_files_from_directory(
+    url: str,
+    base_url: Optional[str] = None,
+    all_files: Optional[List[Tuple[str, str]]] = None,
+    visited: Optional[Set[str]] = None,
+    logger: Optional[logging.Logger] = None,
+) -> List[Tuple[str, str]]:
     if all_files is None:
         all_files = []
     if visited is None:
         visited = set()
     if base_url is None:
-        base_url = url.rstrip('/')
+        base_url = url.rstrip("/")
 
     if url in visited:
         return all_files
     visited.add(url)
 
     try:
-        with urllib.request.urlopen(url) as response:
-            html = response.read().decode('utf-8', errors='ignore')
-            links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
-            links = list(dict.fromkeys(links))
+        valid_links = fetch_directory_links(url, logger=logger)
 
-            valid_links = []
-            for link in links:
-                if link in ['../', './', '..', '.', '']:
-                    continue
-                if link.startswith('/'):
-                    continue
-                if '?C=' in link:
-                    continue
-                valid_links.append(link)
+        for link in valid_links:
+            item_url = url.rstrip("/") + "/" + link.lstrip("/")
+            if link.endswith("/"):
+                get_all_files_from_directory(item_url, base_url, all_files, visited, logger=logger)
+            else:
+                relative_path = item_url.replace(base_url.rstrip("/") + "/", "")
+                all_files.append((relative_path, item_url))
+    except Exception as exc:
+        print(f"Warning: Error scanning directory {url}: {exc}")
 
-            for link in valid_links:
-                item_url = url.rstrip('/') + '/' + link.lstrip('/')
-                if link.endswith('/'):
-                    get_all_files_from_directory(item_url, base_url, all_files, visited)
-                else:
-                    relative_path = item_url.replace(base_url.rstrip('/') + '/', '')
-                    all_files.append((relative_path, item_url))
-        return all_files
-    except Exception as e:
-        print(f"Warning: Error scanning directory {url}: {e}")
-        return all_files
+    return all_files
 
 
-def find_observation_subdir_in_path(root_path):
-    if root_path.name.startswith('observation') and root_path.is_dir():
+def find_observation_subdir_in_path(root_path: Path) -> Optional[Path]:
+    root_path = Path(root_path)
+
+    if root_path.name.startswith("observation") and root_path.is_dir():
         return root_path
+
     for child in sorted(root_path.iterdir()):
-        if child.is_dir() and child.name.startswith('observation'):
+        if child.is_dir() and child.name.startswith("observation"):
             return child
+
     for child in sorted(root_path.iterdir()):
-        if child.is_dir():
-            result = find_observation_subdir_in_path(child)
-            if result:
-                return result
+        if not child.is_dir():
+            continue
+        nested = find_observation_subdir_in_path(child)
+        if nested:
+            return nested
+
     return None
 
 
-def download_directory(directory_url, target_dir):
-    file_list = get_all_files_from_directory(directory_url, base_url=directory_url)
+def download_directory(directory_url: str, target_dir: Path, logger: Optional[logging.Logger] = None) -> None:
+    file_list = get_all_files_from_directory(directory_url, base_url=directory_url, logger=logger)
     if not file_list:
         raise RuntimeError(f"No files found for directory download at {directory_url}")
+
+    total = len(file_list)
+    print(f"Found {total} files to download")
     for idx, (relative_path, file_url) in enumerate(file_list, start=1):
         destination = target_dir / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
+
+        if idx > 1:
+            print()
         print(f"Downloading: {relative_path}")
         urllib.request.urlretrieve(file_url, str(destination), reporthook=download_progress)
         print()
-        percent = min(idx / len(file_list) * 100, 100)
-        print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{len(file_list)} files)", end='', flush=True)
+
+        percent = min(idx / total * 100, 100)
+        print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total} files)", end="", flush=True)
+
     print("\nDirectory download complete.")
 
 
-def update_casa_import_block(script_path, observation_dir_name):
+def update_casa_import_block(script_path: Path, observation_dir_name: str) -> None:
     if not script_path.exists():
         print(f"Warning: {script_path} not found, cannot update hifv_importdata call.")
         return
 
-    text = script_path.read_text(encoding='utf-8')
-    pattern = re.compile(
-        r"hifv_importdata\s*\(\s*vis\s*=\s*\[\s*['\"]([^'\"]+)['\"]\s*\]\s*\)",
-    )
-    if observation_dir_name == '.':
+    text = script_path.read_text(encoding="utf-8")
+    pattern = re.compile(r"hifv_importdata\s*\(\s*vis\s*=\s*\[\s*['\"]([^'\"]+)['\"]\s*\]\s*\)")
+
+    if observation_dir_name == ".":
         replacement = "hifv_importdata(vis=['.'])"
     else:
         replacement = f"hifv_importdata(vis=['{observation_dir_name}'])"
+
     new_text, count = pattern.subn(replacement, text, count=1)
     if count == 0:
         print(f"Warning: Could not find a hifv_importdata(vis=[...]) call to patch in {script_path}.")
         return
-    script_path.write_text(new_text, encoding='utf-8')
+
+    script_path.write_text(new_text, encoding="utf-8")
     print(f"Updated {script_path} to import {observation_dir_name}.")
 
 
-def main():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description='Create a CB working directory from a remote or local observation dataset.'
+        description="Create a CB working directory from a remote or local observation dataset."
     )
-    parser.add_argument('project_code', type=str, help='Project code, e.g. 23A-241')
-    parser.add_argument('object_name', type=str, help='Object name, e.g. AT2019ehz')
-    parser.add_argument('url', type=str, help='URL or local path to the tar file or directory')
-    parser.add_argument('observation_date', type=str, help='Observation date, e.g. 2023-07-22')
-    parser.add_argument('--cb', type=str, default='CB', help='Path to the CB template directory')
-    parser.add_argument('--temp-dir', type=str, default=None, help='Directory to use for temporary downloads and extraction')
-    args = parser.parse_args()
+    parser.add_argument("project_code", type=str, help="Project code, e.g. 23A-241")
+    parser.add_argument("object_name", type=str, help="Object name, e.g. AT2019ehz")
+    parser.add_argument("url", type=str, help="URL or local path to the tar file or directory")
+    parser.add_argument("observation_date", type=str, help="Observation date, e.g. 2023-07-22")
+    parser.add_argument("--cb", type=str, default="CB", help="Path to the CB template directory")
+    parser.add_argument("--temp-dir", type=str, default=None, help="Directory for temporary downloads/extraction")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
+    return parser.parse_args()
+
+
+def resolve_observation_dir_from_local_input(input_path: Path, temp_dir: Path) -> Path:
+    if input_path.is_dir():
+        found = find_observation_subdir_in_path(input_path)
+        if found:
+            return found
+        if input_path.name.startswith("observation"):
+            return input_path
+        raise RuntimeError(f"No subdirectory starting with 'observation' found inside {input_path}.")
+
+    if input_path.is_file():
+        if not tarfile.is_tarfile(str(input_path)):
+            raise RuntimeError(f"Local file {input_path} is not a valid tar archive.")
+
+        tar_copy = temp_dir / input_path.name
+        shutil.copy(str(input_path), str(tar_copy))
+        extract_tar_with_progress(tar_copy, temp_dir)
+        safe_remove(tar_copy)
+
+        found = find_observation_subdir_in_path(temp_dir)
+        if not found:
+            raise RuntimeError("No observation* directory found inside extracted tar archive.")
+        return found
+
+    raise RuntimeError(f"Input path is neither a file nor a directory: {input_path}")
+
+
+def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: logging.Logger) -> Path:
+    if is_tar_url(url):
+        tar_name = Path(url).name or "remote.tar"
+        tar_path = temp_dir / tar_name
+        print(f"Downloading tar file from {url}")
+        urllib.request.urlretrieve(url, str(tar_path), reporthook=download_progress)
+        print("\nDownload complete.")
+
+        if not tarfile.is_tarfile(str(tar_path)):
+            raise RuntimeError(f"Downloaded file is not a valid tar archive: {tar_path}")
+
+        extract_tar_with_progress(tar_path, temp_dir)
+        safe_remove(tar_path)
+
+        found = find_observation_subdir_in_path(temp_dir)
+        if not found:
+            raise RuntimeError("No observation* directory found inside extracted tar archive.")
+        return found
+
+    logger.info("Scanning remote directory for observation* subdirectory at %s", url)
+    obs_info = find_first_observation_dir(url, logger=logger)
+    if obs_info:
+        obs_rel, obs_url = obs_info
+        observation_dir_name = Path(obs_rel).name
+        logger.info("Found observation directory: %s", observation_dir_name)
+        downloaded_root = temp_dir / observation_dir_name
+        downloaded_root.mkdir(parents=True, exist_ok=True)
+        download_directory(obs_url, downloaded_root, logger=logger)
+        return downloaded_root
+
+    raise RuntimeError(
+        "No observation* directory discovered in remote listing and no tar URL provided. "
+        "Provide a direct tar URL, a local path, or a listing containing observation* subdirectories."
+    )
+
+
+def stage_observation_contents(downloaded_dir: Path, workdir_path: Path) -> str:
+    print(f"Moving contents of downloaded observation directory {downloaded_dir} into {workdir_path}")
+    moved_names: List[str] = []
+
+    for item in downloaded_dir.iterdir():
+        destination = workdir_path / item.name
+        if destination.exists():
+            if destination.is_dir():
+                shutil.rmtree(str(destination))
+            else:
+                destination.unlink()
+        shutil.move(str(item), str(destination))
+        moved_names.append(item.name)
+
+    if len(moved_names) == 1 and (workdir_path / moved_names[0]).is_dir():
+        return moved_names[0]
+    return "."
+
+
+def main() -> None:
+    args = parse_args()
+    logger = configure_logging(args.verbose)
 
     workdir_name = f"working.{args.project_code}.{args.object_name}.{args.observation_date}"
     workdir_path = Path(workdir_name)
@@ -249,119 +369,42 @@ def main():
 
     script_dir = Path(__file__).resolve().parent
     cb_template = Path(args.cb)
-    cb_template_src = cb_template if cb_template.is_absolute() else script_dir / cb_template
-
-    downloaded_dir = None
-    observation_subdir_name = None
+    cb_template_src = cb_template if cb_template.is_absolute() else (script_dir / cb_template)
 
     temp_root = Path(args.temp_dir).expanduser().resolve() if args.temp_dir else Path.cwd()
     temp_root.mkdir(parents=True, exist_ok=True)
     print(f"Using temporary directory root: {temp_root}")
 
-    with tempfile.TemporaryDirectory(dir=str(temp_root), prefix='build_cb_') as temp_dir_name:
+    observation_subdir_name = None
+
+    with tempfile.TemporaryDirectory(dir=str(temp_root), prefix="build_cb_") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
-        input_path = Path(args.url)
+        input_path = Path(args.url).expanduser()
 
-        if input_path.exists():
-            if input_path.is_dir():
-                found = find_observation_subdir_in_path(input_path)
-                if found:
-                    downloaded_dir = found
-                elif input_path.name.startswith('observation'):
-                    downloaded_dir = input_path
-                else:
-                    sys.exit(f"Error: No subdirectory starting with 'observation' found inside local directory {input_path}.")
-            elif input_path.is_file():
-                if tarfile.is_tarfile(str(input_path)):
-                    tar_copy = temp_dir / input_path.name
-                    shutil.copy(str(input_path), str(tar_copy))
-                    extract_tar_with_progress(tar_copy, temp_dir)
-                    safe_remove(tar_copy)
-                    found = find_observation_subdir_in_path(temp_dir)
-                    if not found:
-                        sys.exit("Error: No observation* directory found inside extracted tar archive.")
-                    downloaded_dir = found
-                else:
-                    sys.exit(f"Error: Local file {input_path} is not a valid tar archive.")
-        else:
-            if is_tar_url(args.url):
-                tar_name = Path(args.url).name
-                tar_path = temp_dir / tar_name
-                print(f"Downloading tar file from {args.url}")
-                urllib.request.urlretrieve(args.url, str(tar_path), reporthook=download_progress)
-                print("\nDownload complete.")
-                extract_tar_with_progress(tar_path, temp_dir)
-                safe_remove(tar_path)
-                found = find_observation_subdir_in_path(temp_dir)
-                if not found:
-                    sys.exit("Error: No observation* directory found inside extracted tar archive.")
-                downloaded_dir = found
+        try:
+            if input_path.exists():
+                logger.info("Using local input path: %s", input_path)
+                downloaded_dir = resolve_observation_dir_from_local_input(input_path, temp_dir)
             else:
-                print(f"Scanning remote directory for observation* subdirectory at {args.url}")
-                obs_info = find_first_observation_dir(args.url)
-                if obs_info:
-                    obs_rel, obs_url = obs_info
-                    observation_subdir_name = Path(obs_rel).name
-                    print(f"Found observation dir: {observation_subdir_name}")
-                    downloaded_root = temp_dir / observation_subdir_name
-                    downloaded_root.mkdir(parents=True, exist_ok=True)
-                    download_directory(obs_url, downloaded_root)
-                    downloaded_dir = downloaded_root
-                else:
-                    print("No direct observation* directory found in remote listing. Downloading entire directory tree and searching after extraction.")
-                    archive_path = temp_dir / 'remote_dir.tar'
-                    try:
-                        urllib.request.urlretrieve(args.url, str(archive_path), reporthook=download_progress)
-                        print("\nDownloaded remote URL to temporary archive, trying to extract.")
-                        if tarfile.is_tarfile(str(archive_path)):
-                            extract_tar_with_progress(archive_path, temp_dir)
-                            safe_remove(archive_path)
-                            found = find_observation_subdir_in_path(temp_dir)
-                            if found:
-                                downloaded_dir = found
-                            else:
-                                sys.exit("Error: No observation* subdirectory found in extracted temporary archive.")
-                        else:
-                            safe_remove(archive_path)
-                            sys.exit("Error: The URL did not return a tar archive and no observation* directory could be discovered.")
-                    except Exception as e:
-                        safe_remove(archive_path)
-                        sys.exit(f"Error: Failed to download or inspect remote URL: {e}")
+                logger.info("Using remote input URL: %s", args.url)
+                downloaded_dir = resolve_observation_dir_from_remote(args.url, temp_dir, logger)
+        except Exception as exc:
+            sys.exit(f"Error: {exc}")
 
-        if downloaded_dir is None:
-            sys.exit("Error: Failed to obtain an observation* directory from the provided URL or local path.")
-
-        if observation_subdir_name is None:
-            observation_subdir_name = downloaded_dir.name
-
-        print(f"Moving contents of downloaded observation directory {downloaded_dir} into {workdir_path}")
-        moved_names = []
-        for item in downloaded_dir.iterdir():
-            destination = workdir_path / item.name
-            if destination.exists():
-                if destination.is_dir():
-                    shutil.rmtree(str(destination))
-                else:
-                    destination.unlink()
-            shutil.move(str(item), str(destination))
-            moved_names.append(item.name)
-
-        if len(moved_names) == 1 and (workdir_path / moved_names[0]).is_dir():
-            observation_subdir_name = moved_names[0]
-        else:
-            observation_subdir_name = '.'
+        observation_subdir_name = stage_observation_contents(downloaded_dir, workdir_path)
 
     if not cb_template_src.exists():
         sys.exit(f"Error: CB template directory {cb_template_src} does not exist.")
+
     print(f"Copying CB template contents from {cb_template_src} into {workdir_path}")
     copy_tree(cb_template_src, workdir_path)
 
-    casa_script = workdir_path / 'casa_pipescript_666.py'
+    casa_script = workdir_path / "casa_pipescript_666.py"
     update_casa_import_block(casa_script, observation_subdir_name)
 
     print(f"Final working directory created at: {workdir_path.resolve()}")
     print("Process completed successfully.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

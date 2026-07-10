@@ -66,6 +66,12 @@ def parse_args():
         action="store_true",
         help="Show the build/prep/submit commands without executing them.",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging for build_CB.py during the build step.",
+    )
     return parser.parse_args()
 
 
@@ -318,6 +324,8 @@ def run_build(script_dir: Path, project_code: str, object_name: str, url: str, o
     ]
     if args.temp_dir:
         build_cmd.extend(["--temp-dir", args.temp_dir])
+    if args.verbose:
+        build_cmd.append("--verbose")
 
     print("Running build step:")
     print(" ".join(build_cmd))

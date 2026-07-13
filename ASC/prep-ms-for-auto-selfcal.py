@@ -239,11 +239,13 @@ def choose_split_datacolumn(vis):
 
 # where things are
 ms_directory = os.path.dirname(measurement_set)
-auto_sc_files_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "repo")
+auto_sc_files_directory = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "repo", "auto_selfcal")
+)
 if not os.path.isdir(auto_sc_files_directory):
     raise FileNotFoundError(
         f"auto_selfcal repository not found at {auto_sc_files_directory}. "
-        "Initialize the ASC/repo submodule or pass --auto_sc_dir."
+        "Initialize the repo/auto_selfcal submodule at the project root or pass --auto_sc_dir."
     )
 
 # create listfile and scrape for tclean parameters

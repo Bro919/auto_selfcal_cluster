@@ -1,3 +1,6 @@
-[submodule "ASC/repo"]
-	path = ASC/repo
+[submodule "repo/auto_selfcal"]
+	path = repo/auto_selfcal
 	url = https://github.com/psheehan/auto_selfcal
+[submodule "repo/auto-image-VLA"]
+	path = repo/auto-image-VLA
+	url = https://github.com/jlynch2195/auto-image-VLA

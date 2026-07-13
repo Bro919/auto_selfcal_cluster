@@ -322,9 +322,13 @@ def write_auto_image_config(
     def replace_key(content: str, key: str, value: str) -> str:
         pattern = re.compile(rf"^(\s*{re.escape(key)}\s*:\s*).*$", re.MULTILINE)
         if pattern.search(content):
-            if key == "image_size":
-                return pattern.sub(rf"\g<1>{value}", content)
-            return pattern.sub(rf"\g<1>\"{value}\"", content)
+            def replacer(match: re.Match) -> str:
+                prefix = match.group(1)
+                if key == "image_size":
+                    return f"{prefix}{value}"
+                return f'{prefix}"{value}"'
+
+            return pattern.sub(replacer, content, count=1)
         if key == "image_size":
             return content.rstrip() + f"\n{key}: {value}\n"
         return content.rstrip() + f"\n{key}: \"{value}\"\n"

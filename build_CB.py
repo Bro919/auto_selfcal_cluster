@@ -312,7 +312,7 @@ def write_auto_image_config(
         )
 
     replacements = {
-        "measurement_set": str(measurement_set_path),
+        "measurement_set": str(measurement_set_path.resolve()),
         "project_code": project_code,
         "source_name": source_name,
         "image_size": str(image_size),
@@ -323,8 +323,8 @@ def write_auto_image_config(
         pattern = re.compile(rf"^(\s*{re.escape(key)}\s*:\s*).*$", re.MULTILINE)
         if pattern.search(content):
             if key == "image_size":
-                return pattern.sub(rf"\\1{value}", content)
-            return pattern.sub(rf"\\1\"{value}\"", content)
+                return pattern.sub(rf"\g<1>{value}", content)
+            return pattern.sub(rf"\g<1>\"{value}\"", content)
         if key == "image_size":
             return content.rstrip() + f"\n{key}: {value}\n"
         return content.rstrip() + f"\n{key}: \"{value}\"\n"

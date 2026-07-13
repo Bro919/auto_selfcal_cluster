@@ -279,6 +279,61 @@ def update_casa_import_block(script_path: Path, observation_dir_name: str) -> No
     print(f"Updated {script_path} to import {observation_dir_name}.")
 
 
+def compute_expected_ms_path(
+    workdir_path: Path,
+    observation_subdir_name: str,
+    project_code: str,
+    object_name: str,
+    observation_date: str,
+) -> Path:
+    if observation_subdir_name and observation_subdir_name != ".":
+        return workdir_path / f"{observation_subdir_name}.ms"
+    return workdir_path / f"{project_code}.{object_name}.{observation_date}.ms"
+
+
+def write_auto_image_config(
+    auto_image_dir: Path,
+    measurement_set_path: Path,
+    project_code: str,
+    source_name: str,
+    image_size: int,
+) -> None:
+    config_example = auto_image_dir / "config.example.yaml"
+    config_target = auto_image_dir / "config.yaml"
+
+    if config_example.exists():
+        text = config_example.read_text(encoding="utf-8")
+    else:
+        text = (
+            "measurement_set: \"path/to/data.ms\"\n"
+            "source_name: \"target\"\n"
+            "image_size: 512\n"
+        )
+
+    replacements = {
+        "measurement_set": str(measurement_set_path),
+        "project_code": project_code,
+        "source_name": source_name,
+        "image_size": str(image_size),
+    }
+
+    def replace_key(content: str, key: str, value: str) -> str:
+        pattern = re.compile(rf"^(\s*{re.escape(key)}\s*:\s*).*$", re.MULTILINE)
+        if pattern.search(content):
+            if key == "image_size":
+                return pattern.sub(rf"\\1{value}", content)
+            return pattern.sub(rf"\\1\"{value}\"", content)
+        if key == "image_size":
+            return content.rstrip() + f"\n{key}: {value}\n"
+        return content.rstrip() + f"\n{key}: \"{value}\"\n"
+
+    for key, value in replacements.items():
+        text = replace_key(text, key, value)
+
+    config_target.write_text(text, encoding="utf-8")
+    print(f"Wrote auto-image config: {config_target}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Create a CB working directory from a remote or local observation dataset."
@@ -293,6 +348,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--url", help="URL or local path to tar file/directory")
     parser.add_argument("--cb", type=str, default="CB", help="Path to the CB template directory")
+    parser.add_argument(
+        "--auto-image-vla",
+        type=str,
+        default="repo/auto-image-VLA",
+        help="Path to the auto-image-VLA directory to copy into the working directory",
+    )
+    parser.add_argument(
+        "--auto-image-size",
+        type=int,
+        default=512,
+        help="image_size value written to auto-image-VLA/config.yaml",
+    )
     parser.add_argument("--temp-dir", type=str, default=None, help="Directory for temporary downloads/extraction")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce non-critical output noise")
@@ -481,6 +548,8 @@ def main() -> None:
     script_dir = Path(__file__).resolve().parent
     cb_template = Path(args.cb)
     cb_template_src = cb_template if cb_template.is_absolute() else (script_dir / cb_template)
+    auto_image_vla = Path(args.auto_image_vla)
+    auto_image_vla_src = auto_image_vla if auto_image_vla.is_absolute() else (script_dir / auto_image_vla)
 
     temp_root = Path(args.temp_dir).expanduser().resolve() if args.temp_dir else Path.cwd()
     temp_root.mkdir(parents=True, exist_ok=True)
@@ -506,9 +575,29 @@ def main() -> None:
 
     if not cb_template_src.exists():
         sys.exit(f"Error: CB template directory {cb_template_src} does not exist.")
+    if not auto_image_vla_src.exists() or not auto_image_vla_src.is_dir():
+        sys.exit(f"Error: auto-image-VLA directory {auto_image_vla_src} does not exist.")
 
     print(f"Copying CB template contents from {cb_template_src} into {workdir_path}")
     copy_tree(cb_template_src, workdir_path)
+    auto_image_vla_dst = workdir_path / auto_image_vla_src.name
+    print(f"Copying auto-image-VLA from {auto_image_vla_src} into {auto_image_vla_dst}")
+    copy_tree(auto_image_vla_src, auto_image_vla_dst)
+
+    expected_ms_path = compute_expected_ms_path(
+        workdir_path,
+        observation_subdir_name,
+        args.project_code,
+        args.object_name,
+        args.observation_date,
+    )
+    write_auto_image_config(
+        auto_image_vla_dst,
+        expected_ms_path,
+        args.project_code,
+        args.object_name,
+        args.auto_image_size,
+    )
 
     casa_script = workdir_path / "casa_pipescript_666.py"
     update_casa_import_block(casa_script, observation_subdir_name)

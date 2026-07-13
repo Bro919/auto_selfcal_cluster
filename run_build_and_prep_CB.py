@@ -44,6 +44,17 @@ def parse_args() -> argparse.Namespace:
         help="Alias for --url; local path or URL used for metadata inference when needed.",
     )
     parser.add_argument("--cb", default="CB", help="Path to CB template directory (default: CB)")
+    parser.add_argument(
+        "--auto-image-vla",
+        default="repo/auto-image-VLA",
+        help="Path to auto-image-VLA directory copied into the CB working directory",
+    )
+    parser.add_argument(
+        "--auto-image-size",
+        type=int,
+        default=512,
+        help="image_size value written to auto-image-VLA/config.yaml",
+    )
     parser.add_argument("--temp-dir", help="Optional temporary directory for downloads and extraction")
 
     parser.add_argument("--skip-submit", action="store_true", help="Build and prepare the job, but do not submit")
@@ -393,6 +404,10 @@ def run_build(
         observation_date,
         "--cb",
         args.cb,
+        "--auto-image-vla",
+        args.auto_image_vla,
+        "--auto-image-size",
+        str(args.auto_image_size),
     ]
     if args.temp_dir:
         command.extend(["--temp-dir", args.temp_dir])

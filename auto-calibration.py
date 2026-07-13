@@ -20,6 +20,11 @@ def parse_args():
     parser.add_argument("--cb-workdir", help="Existing CB working directory to use instead of running build/prep")
     parser.add_argument("--skip-cb", action="store_true", help="Skip CB build/prep and use --cb-workdir directly")
     parser.add_argument("--cb-template", default="CB", help="Path to the CB template directory")
+    parser.add_argument(
+        "--cb-auto-image-vla",
+        default="repo/auto-image-VLA",
+        help="Path to auto-image-VLA directory copied into CB working directories",
+    )
     parser.add_argument("--asc-template", default="ASC", help="Path to the ASC template directory")
     parser.add_argument("--cb-temp-dir", help="Optional temporary directory for CB downloads and extraction")
 
@@ -191,6 +196,7 @@ def run_cb_workflow(args: argparse.Namespace) -> Path:
     cb_workdir = compute_cb_workdir(args.project_code, args.object_name, args.observation_date)
     cmd = [sys.executable, str(cb_script), args.project_code, args.object_name, cb_url, args.observation_date]
     cmd.extend(["--cb", args.cb_template])
+    cmd.extend(["--auto-image-vla", args.cb_auto_image_vla])
     if args.cb_temp_dir:
         cmd.extend(["--temp-dir", args.cb_temp_dir])
     if not args.cb_submit:

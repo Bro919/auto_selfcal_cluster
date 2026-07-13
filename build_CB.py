@@ -297,6 +297,7 @@ def write_auto_image_config(
     project_code: str,
     source_name: str,
     image_size: int,
+    split: str,
 ) -> None:
     config_example = auto_image_dir / "config.example.yaml"
     config_target = auto_image_dir / "config.yaml"
@@ -315,6 +316,7 @@ def write_auto_image_config(
         "project_code": project_code,
         "source_name": source_name,
         "image_size": str(image_size),
+        "split": split,
     }
 
     def replace_key(content: str, key: str, value: str) -> str:
@@ -359,6 +361,13 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=512,
         help="image_size value written to auto-image-VLA/config.yaml",
+    )
+    parser.add_argument(
+        "--auto-image-split",
+        type=str,
+        default="both",
+        choices=["whole", "halves", "both"],
+        help="split value written to auto-image-VLA/config.yaml",
     )
     parser.add_argument("--temp-dir", type=str, default=None, help="Directory for temporary downloads/extraction")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose debug logging")
@@ -597,6 +606,7 @@ def main() -> None:
         args.project_code,
         args.object_name,
         args.auto_image_size,
+        args.auto_image_split,
     )
 
     casa_script = workdir_path / "casa_pipescript_666.py"

@@ -55,6 +55,13 @@ def parse_args() -> argparse.Namespace:
         default=512,
         help="image_size value written to auto-image-VLA/config.yaml",
     )
+    parser.add_argument(
+        "--auto-image-split",
+        type=str,
+        default="both",
+        choices=["whole", "halves", "both"],
+        help="split value written to auto-image-VLA/config.yaml",
+    )
     parser.add_argument("--temp-dir", help="Optional temporary directory for downloads and extraction")
 
     parser.add_argument("--skip-submit", action="store_true", help="Build and prepare the job, but do not submit")
@@ -408,6 +415,8 @@ def run_build(
         args.auto_image_vla,
         "--auto-image-size",
         str(args.auto_image_size),
+        "--auto-image-split",
+        args.auto_image_split,
     ]
     if args.temp_dir:
         command.extend(["--temp-dir", args.temp_dir])

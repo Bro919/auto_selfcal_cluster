@@ -27,6 +27,13 @@ SBATCH_EXPORT_ALL = True
 MODULE_LOAD = None
 USE_EXECFILE = False
 
+ENABLE_AUTO_IMAGE_FOLLOWUP = True
+AUTO_IMAGE_DIR = "auto-image-VLA"
+AUTO_IMAGE_SCRIPT = "run-auto-image.py"
+AUTO_IMAGE_JOB_SCRIPT_NAME = "run_auto_image.sh"
+AUTO_IMAGE_JOB_NAME_PREFIX = "AutoImage"
+AUTO_IMAGE_USE_EXECFILE = False
+
 
 def build_slurm_script(
     workdir,
@@ -44,9 +51,9 @@ def build_slurm_script(
     mail_user,
     export_all,
     module_load,
-    casa_executable,
-    casa_script,
-    use_execfile,
+    command,
+    start_message,
+    complete_message,
 ):
     workdir_abs = workdir.resolve()
     header_lines = ["#!/bin/bash", ""]
@@ -77,26 +84,28 @@ def build_slurm_script(
     if mail_user:
         header_lines.append(f"#SBATCH --mail-user={mail_user}")
 
-    body_lines = ["", "set -euo pipefail", "", "echo \"Starting CASA non-interactive job\"", ""]
+    body_lines = ["", "set -euo pipefail", "", f"echo \"{start_message}\"", ""]
 
     if module_load:
         body_lines.extend([f"echo \"Loading module: {module_load}\"", f"module load {module_load}", ""])
 
+    safe_command = command.replace("'", "'\"'\"'")
+
+    body_lines.append(f"echo 'Running: {safe_command}'")
+    body_lines.append(command)
+    body_lines.append("")
+    body_lines.append(f"echo \"{complete_message}\"")
+
+    return "\n".join(header_lines + body_lines) + "\n"
+
+
+def build_casa_command(casa_executable, casa_script, use_execfile):
     quoted_casa = shlex.quote(casa_executable)
     if use_execfile:
         python_code = f"execfile({repr(casa_script)})"
     else:
         python_code = f"exec(open({repr(casa_script)}).read())"
-
-    casa_command = f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
-    safe_casa_command = casa_command.replace("'", "'\"'\"'")
-
-    body_lines.append(f"echo 'Running: {safe_casa_command}'")
-    body_lines.append(casa_command)
-    body_lines.append("")
-    body_lines.append("echo \"CASA job complete\"")
-
-    return "\n".join(header_lines + body_lines) + "\n"
+    return f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
 
 
 def write_batch_list(batch_file, paths, append=False):
@@ -124,6 +133,12 @@ output = f"{job_name}.out"
 error = f"{job_name}.err"
 job_script_path = workdir / JOB_SCRIPT_NAME
 
+calibration_command = build_casa_command(
+    casa_executable=CASA_EXECUTABLE,
+    casa_script=CASA_SCRIPT,
+    use_execfile=USE_EXECFILE,
+)
+
 script_content = build_slurm_script(
     workdir=workdir,
     job_name=job_name,
@@ -140,9 +155,9 @@ script_content = build_slurm_script(
     mail_user=SBATCH_MAIL_USER,
     export_all=SBATCH_EXPORT_ALL,
     module_load=MODULE_LOAD,
-    casa_executable=CASA_EXECUTABLE,
-    casa_script=CASA_SCRIPT,
-    use_execfile=USE_EXECFILE,
+    command=calibration_command,
+    start_message="Starting CASA non-interactive calibration job",
+    complete_message="CASA calibration job complete",
 )
 
 if DRY_RUN:
@@ -154,6 +169,50 @@ job_script_path.write_text(script_content, encoding="utf-8")
 job_script_path.chmod(0o755)
 print(f"Created SLURM job script: {job_script_path}")
 
-write_batch_list(BATCH_LIST_FILE, [str(job_script_path.resolve())], append=APPEND_BATCH_LIST)
+batch_paths = [str(job_script_path.resolve())]
+
+if ENABLE_AUTO_IMAGE_FOLLOWUP:
+    auto_image_script_path = workdir / AUTO_IMAGE_DIR / AUTO_IMAGE_SCRIPT
+    if auto_image_script_path.exists():
+        auto_job_name = f"{AUTO_IMAGE_JOB_NAME_PREFIX}-{workdir.name}"
+        auto_output = f"{auto_job_name}.out"
+        auto_error = f"{auto_job_name}.err"
+        auto_job_script_path = workdir / AUTO_IMAGE_JOB_SCRIPT_NAME
+        auto_image_command = build_casa_command(
+            casa_executable=CASA_EXECUTABLE,
+            casa_script=f"{AUTO_IMAGE_DIR}/{AUTO_IMAGE_SCRIPT}",
+            use_execfile=AUTO_IMAGE_USE_EXECFILE,
+        )
+        auto_script_content = build_slurm_script(
+            workdir=workdir,
+            job_name=auto_job_name,
+            output=auto_output,
+            error=auto_error,
+            time_limit=SBATCH_TIME,
+            mem=SBATCH_MEM,
+            nodes=SBATCH_NODES,
+            ntasks_per_node=SBATCH_NTASKS_PER_NODE,
+            cpus_per_task=SBATCH_CPUS_PER_TASK,
+            partition=SBATCH_PARTITION,
+            account=SBATCH_ACCOUNT,
+            mail_type=SBATCH_MAIL_TYPE,
+            mail_user=SBATCH_MAIL_USER,
+            export_all=SBATCH_EXPORT_ALL,
+            module_load=MODULE_LOAD,
+            command=auto_image_command,
+            start_message="Starting auto-image follow-up job",
+            complete_message="Auto-image job complete",
+        )
+        auto_job_script_path.write_text(auto_script_content, encoding="utf-8")
+        auto_job_script_path.chmod(0o755)
+        print(f"Created follow-up SLURM job script: {auto_job_script_path}")
+        batch_paths.append(str(auto_job_script_path.resolve()))
+    else:
+        print(
+            f"Warning: auto-image follow-up script not found at {auto_image_script_path}; "
+            "second job was not generated."
+        )
+
+write_batch_list(BATCH_LIST_FILE, batch_paths, append=APPEND_BATCH_LIST)
 action = "Appended" if APPEND_BATCH_LIST else "Wrote"
-print(f"{action} 1 script path to {Path(BATCH_LIST_FILE).expanduser().resolve()}")
+print(f"{action} {len(batch_paths)} script path(s) to {Path(BATCH_LIST_FILE).expanduser().resolve()}")

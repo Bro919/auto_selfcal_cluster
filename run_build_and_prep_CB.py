@@ -76,6 +76,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Seconds to wait between sbatch submissions",
     )
+    parser.add_argument(
+        "--submit-no-chain-afterok",
+        action="store_true",
+        help="Disable afterok dependency chaining between submitted CB scripts",
+    )
 
     parser.add_argument("--dry-run", action="store_true", help="Show build/prep/submit commands without executing")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
@@ -447,6 +452,8 @@ def run_submit(workdir: Path, args: argparse.Namespace, logger: logging.Logger) 
         command.append("--dry-run")
     if args.submit_sleep_seconds is not None:
         command.extend(["--sleep-seconds", str(args.submit_sleep_seconds)])
+    if args.submit_no_chain_afterok:
+        command.append("--no-chain-afterok")
 
     run_checked(command, workdir, logger, "Submitting CB job(s)", args.dry_run)
 

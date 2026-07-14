@@ -294,7 +294,6 @@ def compute_expected_ms_path(
 def write_auto_image_config(
     auto_image_dir: Path,
     measurement_set_path: Path,
-    project_code: str,
     source_name: str,
     image_size: int,
     split: str,
@@ -313,7 +312,6 @@ def write_auto_image_config(
 
     replacements = {
         "measurement_set": str(measurement_set_path.resolve()),
-        "project_code": project_code,
         "source_name": source_name,
         "image_size": str(image_size),
         "split": split,
@@ -607,7 +605,6 @@ def main() -> None:
     write_auto_image_config(
         auto_image_vla_dst,
         expected_ms_path,
-        args.project_code,
         args.object_name,
         args.auto_image_size,
         args.auto_image_split,

@@ -78,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--submit-no-chain-afterok",
-        action="store_false",
+        action="store_true",
         help="Disable afterok dependency chaining between submitted CB scripts",
     )
 

@@ -248,6 +248,21 @@ if not os.path.isdir(auto_sc_files_directory):
         "Initialize the repo/auto_selfcal submodule at the project root or pass --auto_sc_dir."
     )
 
+auto_sc_repo_dir = auto_sc_files_directory
+if os.path.basename(os.path.normpath(auto_sc_files_directory)) == "auto_selfcal":
+    inner_pkg = os.path.join(auto_sc_files_directory, "auto_selfcal")
+    if os.path.isdir(inner_pkg):
+        auto_sc_repo_dir = auto_sc_files_directory
+        auto_sc_files_directory = inner_pkg
+    else:
+        auto_sc_repo_dir = os.path.dirname(auto_sc_files_directory)
+
+if not os.path.isdir(auto_sc_files_directory):
+    raise FileNotFoundError(
+        f"auto_selfcal package directory not found at {auto_sc_files_directory}. "
+        "Expected the package at repo/auto_selfcal/auto_selfcal or pass --auto_sc_dir accordingly."
+    )
+
 # create listfile and scrape for tclean parameters
 listfile = ms_directory+"listfile.txt"
 listobs(vis=measurement_set, listfile=listfile, overwrite=True)
@@ -290,8 +305,8 @@ for i in range(len(split_ms_directories)):
 
     # move the auto_selfcal dependency files into this split directory
     os.makedirs(split_ms_directory, exist_ok=True)
-    auto_sc_bin_dir = os.path.join(auto_sc_files_directory, 'bin')
-    auto_sc_package_dir = os.path.join(auto_sc_files_directory, 'auto_selfcal')
+    auto_sc_bin_dir = os.path.join(auto_sc_repo_dir, 'bin')
+    auto_sc_package_dir = auto_sc_files_directory
     if os.path.isdir(auto_sc_bin_dir):
         for filepath in glob.glob(os.path.join(auto_sc_bin_dir, '*.py')):
             shutil.copy2(filepath, split_ms_directory)

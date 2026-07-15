@@ -941,7 +941,7 @@ def main() -> None:
         args.auto_sc_dir = str(auto_sc_path)
         logger.info("Using provided auto_selfcal path: %s", args.auto_sc_dir)
     else:
-        default_auto_sc = Path(__file__).resolve().parent / "repo" / "auto_selfcal"
+        default_auto_sc = Path(__file__).resolve().parent / "repo" / "auto_selfcal" / "auto_selfcal"
         if default_auto_sc.exists():
             args.auto_sc_dir = str(default_auto_sc.resolve())
             logger.info("Using default auto_selfcal path: %s", args.auto_sc_dir)

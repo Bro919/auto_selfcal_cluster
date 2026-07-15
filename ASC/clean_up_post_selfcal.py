@@ -53,7 +53,9 @@ def parse_args():
 
 
 args = parse_args()
+# Normalize once so later path operations always use pathlib semantics.
 root_dir = Path(args.root_dir or os.getcwd())
+root_dir = Path(root_dir).expanduser()
 prefix_string = args.prefix
 final_images_only = not args.all_final_products
 apply_calibrations = args.apply_calibrations
@@ -63,12 +65,6 @@ if not root_dir.is_dir():
     raise FileNotFoundError(
         f"root_dir does not exist: {root_dir}.\n"
         "Please run the script from the observation root or pass the correct path."
-    )
-
-if not os.path.isdir(root_dir):
-    raise FileNotFoundError(
-        f"root_dir does not exist: {root_dir}.\n"
-        "Please set `root_dir` to the correct observation directory before running the script."
     )
 
 # for an SED

@@ -4,6 +4,7 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 def parse_args():
@@ -128,7 +129,7 @@ def is_ms_dir(path: Path) -> bool:
     return bool(folder_names & {"FIELD", "MAIN", "ANTENNA", "SOURCE", "SPECTRAL_WINDOW", "OBSERVATION"})
 
 
-def find_ms_directory(root_dir: Path) -> Path:
+def find_ms_directory(root_dir: Path) -> Optional[Path]:
     root_dir = Path(root_dir)
     if is_ms_dir(root_dir):
         return root_dir
@@ -244,7 +245,7 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
     if args.asc_auto_sc_dir:
         cmd.extend(["--auto_sc_dir", args.asc_auto_sc_dir])
     if args.asc_no_casa:
-        cmd.append("--run-casa")
+        cmd.append("--no-run-casa")
     if args.asc_skip_submit:
         cmd.append("--skip-submit")
     if args.asc_dry_run or args.dry_run:

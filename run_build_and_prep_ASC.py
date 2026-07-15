@@ -472,8 +472,15 @@ def patch_prep_script(
     lines = prep_path.read_text(encoding="utf-8").splitlines()
     updated_lines = []
     found_keys = set()
+    skip_auto_sc_block_depth = 0
 
     for line in lines:
+        if skip_auto_sc_block_depth > 0:
+            skip_auto_sc_block_depth += line.count("(") - line.count(")")
+            if skip_auto_sc_block_depth <= 0:
+                skip_auto_sc_block_depth = 0
+            continue
+
         replaced = False
         for key, pattern in patterns.items():
             if re.match(pattern, line):
@@ -485,6 +492,9 @@ def patch_prep_script(
                         replaced = True
                         break
                     replacement = f'auto_sc_files_directory = "{auto_sc_dir}"'
+                    block_depth = line.count("(") - line.count(")")
+                    if block_depth > 0:
+                        skip_auto_sc_block_depth = block_depth
                 else:
                     replacement = replacements[key]
                 updated_lines.append(replacement)
@@ -925,6 +935,21 @@ def main() -> None:
     logger = configure_logging(args.verbose)
     logger.info("Starting ASC build+prep runner")
     logger.info("Verbose mode: %s", "on" if args.verbose else "off")
+
+    if args.auto_sc_dir:
+        auto_sc_path = Path(args.auto_sc_dir).expanduser().resolve()
+        args.auto_sc_dir = str(auto_sc_path)
+        logger.info("Using provided auto_selfcal path: %s", args.auto_sc_dir)
+    else:
+        default_auto_sc = Path(__file__).resolve().parent / "repo" / "auto_selfcal"
+        if default_auto_sc.exists():
+            args.auto_sc_dir = str(default_auto_sc.resolve())
+            logger.info("Using default auto_selfcal path: %s", args.auto_sc_dir)
+        else:
+            logger.warning(
+                "Default auto_selfcal path not found at %s; prep script fallback will be used",
+                default_auto_sc,
+            )
 
     source_value = args.ms_path or args.source
     if source_value:

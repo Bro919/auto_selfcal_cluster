@@ -33,6 +33,7 @@ AUTO_IMAGE_SCRIPT = "run-auto-image.py"
 AUTO_IMAGE_JOB_SCRIPT_NAME = "run_auto_image.sh"
 AUTO_IMAGE_JOB_NAME_PREFIX = "AutoImage"
 AUTO_IMAGE_USE_EXECFILE = False
+AUTO_IMAGE_ENSURE_PANDAS = True
 
 
 def build_slurm_script(
@@ -51,7 +52,7 @@ def build_slurm_script(
     mail_user,
     export_all,
     module_load,
-    command,
+    commands,
     start_message,
     complete_message,
 ):
@@ -89,22 +90,41 @@ def build_slurm_script(
     if module_load:
         body_lines.extend([f"echo \"Loading module: {module_load}\"", f"module load {module_load}", ""])
 
-    safe_command = command.replace("'", "'\"'\"'")
-
-    body_lines.append(f"echo 'Running: {safe_command}'")
-    body_lines.append(command)
-    body_lines.append("")
+    for command in commands:
+        safe_command = command.replace("'", "'\"'\"'")
+        body_lines.append(f"echo 'Running: {safe_command}'")
+        body_lines.append(command)
+        body_lines.append("")
     body_lines.append(f"echo \"{complete_message}\"")
 
     return "\n".join(header_lines + body_lines) + "\n"
 
 
-def build_casa_command(casa_executable, casa_script, use_execfile):
+def build_casa_command(casa_executable, casa_script, use_execfile, ensure_user_site=False):
     quoted_casa = shlex.quote(casa_executable)
+    prelude = ""
+    if ensure_user_site:
+        prelude = (
+            "import os,sys;"
+            "_user_site=os.path.expanduser("
+            "f'~/.local/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages'"
+            ");"
+            "sys.path.insert(0,_user_site) if _user_site not in sys.path else None;"
+        )
     if use_execfile:
-        python_code = f"execfile({repr(casa_script)})"
+        python_code = f"{prelude}execfile({repr(casa_script)})"
     else:
-        python_code = f"exec(open({repr(casa_script)}).read())"
+        python_code = f"{prelude}exec(open({repr(casa_script)}).read())"
+    return f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
+
+
+def build_casa_install_pandas_command(casa_executable):
+    quoted_casa = shlex.quote(casa_executable)
+    python_code = (
+        "import subprocess,sys;"
+        "print(f'Installing pandas into CASA Python: {sys.executable}');"
+        "subprocess.run([sys.executable,'-m','pip','install','--user','pandas'],check=True)"
+    )
     return f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
 
 
@@ -155,7 +175,7 @@ script_content = build_slurm_script(
     mail_user=SBATCH_MAIL_USER,
     export_all=SBATCH_EXPORT_ALL,
     module_load=MODULE_LOAD,
-    command=calibration_command,
+    commands=[calibration_command],
     start_message="Starting CASA non-interactive calibration job",
     complete_message="CASA calibration job complete",
 )
@@ -182,7 +202,11 @@ if ENABLE_AUTO_IMAGE_FOLLOWUP:
             casa_executable=CASA_EXECUTABLE,
             casa_script=f"{AUTO_IMAGE_DIR}/{AUTO_IMAGE_SCRIPT}",
             use_execfile=AUTO_IMAGE_USE_EXECFILE,
+            ensure_user_site=AUTO_IMAGE_ENSURE_PANDAS,
         )
+        auto_commands = [auto_image_command]
+        if AUTO_IMAGE_ENSURE_PANDAS:
+            auto_commands.insert(0, build_casa_install_pandas_command(CASA_EXECUTABLE))
         auto_script_content = build_slurm_script(
             workdir=workdir,
             job_name=auto_job_name,
@@ -199,7 +223,7 @@ if ENABLE_AUTO_IMAGE_FOLLOWUP:
             mail_user=SBATCH_MAIL_USER,
             export_all=SBATCH_EXPORT_ALL,
             module_load=MODULE_LOAD,
-            command=auto_image_command,
+            commands=auto_commands,
             start_message="Starting auto-image follow-up job",
             complete_message="Auto-image job complete",
         )

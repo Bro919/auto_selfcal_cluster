@@ -316,6 +316,62 @@ def resolve_target_field_fallback(vis, source_name):
         except Exception:
             pass
 
+
+def get_field_row_counts(vis):
+    """Return per-field row counts from the MAIN table."""
+    try:
+        from casatools import table as casatable
+    except Exception:
+        return {}
+
+    tb_local = casatable()
+    try:
+        tb_local.open(vis)
+        field_ids = tb_local.getcol("FIELD_ID")
+    finally:
+        try:
+            tb_local.close()
+        except Exception:
+            pass
+
+    counts = {}
+    for field_id in field_ids:
+        key = int(field_id)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def resolve_initial_split_field(vis, requested_field, source_name):
+    """Choose a field for initial split that is guaranteed to have data rows."""
+    row_counts = get_field_row_counts(vis)
+    if not row_counts:
+        return requested_field
+
+    if requested_field is not None:
+        try:
+            req_id = int(requested_field)
+            if row_counts.get(req_id, 0) > 0:
+                return str(req_id)
+        except Exception:
+            pass
+
+    fallback_field = resolve_target_field_fallback(vis, source_name)
+    if fallback_field is not None:
+        try:
+            fb_id = int(fallback_field)
+            if row_counts.get(fb_id, 0) > 0:
+                return str(fb_id)
+        except Exception:
+            pass
+
+    # Return first field id that has rows; this avoids null-selection failures.
+    for field_id, count in sorted(row_counts.items()):
+        if count > 0:
+            return str(field_id)
+
+    # No usable field rows found. Caller should split without a field selection.
+    return None
+
 # where things are
 ms_directory = os.path.dirname(measurement_set)
 auto_sc_files_directory = os.path.abspath(
@@ -380,7 +436,14 @@ print(f"Splitting into _target.ms")
 if not os.path.exists(measurement_set_target):
     initial_datacolumn = choose_split_datacolumn(measurement_set)
     print(f"Using datacolumn='{initial_datacolumn}' for initial target split")
-    split(vis=measurement_set, field=field, datacolumn=initial_datacolumn, outputvis=measurement_set_target)
+    split_field = resolve_initial_split_field(measurement_set, field, source_name)
+    if split_field is None:
+        print("Warning: could not resolve a non-empty target field; splitting full MS without field selection.")
+        split(vis=measurement_set, datacolumn=initial_datacolumn, outputvis=measurement_set_target)
+    else:
+        if str(field) != str(split_field):
+            print(f"Warning: requested field {field} had no rows; using fallback field id {split_field} for initial split.")
+        split(vis=measurement_set, field=split_field, datacolumn=initial_datacolumn, outputvis=measurement_set_target)
 
 print(f"Splitting into {df_store.shape[0]} measurement sets")
 split_ms_directories, split_ms_paths = split_ms(df_store, measurement_set_target)

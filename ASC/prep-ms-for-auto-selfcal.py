@@ -237,6 +237,34 @@ def choose_split_datacolumn(vis):
 
     raise RuntimeError(f"No supported split datacolumn found in {vis}; columns={sorted(available_columns)}")
 
+
+def patch_split_auto_selfcal_launcher(split_ms_directory):
+    """Patch copied launcher to import from local ./auto_selfcal package."""
+    launcher_path = os.path.join(split_ms_directory, "auto_selfcal.py")
+    if not os.path.isfile(launcher_path):
+        return
+
+    with open(launcher_path, "r", encoding="utf-8") as handle:
+        content = handle.read()
+
+    marker = "# ASC split-dir path fix"
+    if marker in content:
+        return
+
+    target = 'sys.path.append(os.path.dirname(__file__)+"/..")'
+    replacement = (
+        "# ASC split-dir path fix\n"
+        "_split_dir = os.path.dirname(os.path.abspath(__file__))\n"
+        "if _split_dir not in sys.path:\n"
+        "    sys.path.insert(0, _split_dir)\n"
+        + target
+    )
+
+    if target in content:
+        content = content.replace(target, replacement, 1)
+        with open(launcher_path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+
 # where things are
 ms_directory = os.path.dirname(measurement_set)
 auto_sc_files_directory = os.path.abspath(
@@ -312,6 +340,7 @@ for i in range(len(split_ms_directories)):
             shutil.copy2(filepath, split_ms_directory)
     if os.path.isdir(auto_sc_package_dir):
         shutil.copytree(auto_sc_package_dir, os.path.join(split_ms_directory, 'auto_selfcal'), dirs_exist_ok=True)
+    patch_split_auto_selfcal_launcher(split_ms_directory)
 
     # write batch file
     job_base = f"auto_selfcal_{split_ms_name}"

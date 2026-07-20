@@ -355,8 +355,7 @@ def resolve_target_field_fallback(vis, source_name):
                 candidates.sort(reverse=True)
                 return str(candidates[0][1])
 
-            # Never blindly pick another field when a source name was requested.
-            return None
+            # No direct source-name match. Continue to intent-based safe fallback.
 
         # Legacy fallback (only when source_name is missing): choose non-calibrator TARGET-like field.
         intents = [str(intent) for intent in msmd_local.intents()]
@@ -375,6 +374,10 @@ def resolve_target_field_fallback(vis, source_name):
 
         preferred = [fid for fid in sorted(target_ids) if fid not in calibrator_ids and row_counts.get(fid, 0) > 0]
         if preferred:
+            # If source_name was provided and multiple science candidates exist,
+            # force explicit selection to avoid choosing the wrong science field.
+            if source_name and len(preferred) > 1:
+                return None
             preferred.sort(key=lambda fid: row_counts.get(fid, 0), reverse=True)
             return str(preferred[0])
 
@@ -424,6 +427,53 @@ def source_matches_field_name(source_name, field_name):
     if not src_norm or not fld_norm:
         return False
     return src_norm == fld_norm or src_norm in fld_norm or fld_norm in src_norm
+
+
+def get_field_diagnostics(vis):
+    """Return field diagnostics for error messages and debug visibility."""
+    row_counts = get_field_row_counts(vis)
+    entries = []
+    try:
+        from casatools import msmetadata
+    except Exception:
+        return entries
+
+    msmd_local = msmetadata()
+    try:
+        msmd_local.open(vis)
+        field_names = list(msmd_local.fieldnames())
+        intents = [str(intent) for intent in msmd_local.intents()]
+
+        target_ids = set()
+        calibrator_ids = set()
+        for intent in intents:
+            try:
+                field_ids = [int(fid) for fid in list(msmd_local.fieldsforintent(intent))]
+            except Exception:
+                continue
+            upper_intent = intent.upper()
+            if "TARGET" in upper_intent:
+                target_ids.update(field_ids)
+            if any(tag in upper_intent for tag in ["CALIBRATE", "BANDPASS", "PHASE", "FLUX", "POINTING"]):
+                calibrator_ids.update(field_ids)
+
+        for idx, name in enumerate(field_names):
+            entries.append(
+                {
+                    "id": idx,
+                    "name": str(name),
+                    "rows": int(row_counts.get(idx, 0)),
+                    "is_target_intent": idx in target_ids,
+                    "is_calibrator_intent": idx in calibrator_ids,
+                }
+            )
+    finally:
+        try:
+            msmd_local.close()
+        except Exception:
+            pass
+
+    return entries
 
 
 def get_field_row_counts(vis):
@@ -522,6 +572,14 @@ if field is None:
         field = fallback_field
         print(f"Warning: source '{source_name}' not found in listfile fields; using fallback field id {field} from MS metadata.")
     else:
+        diag = get_field_diagnostics(measurement_set)
+        if diag:
+            print("Field diagnostics (id, rows, target_intent, calibrator_intent, name):")
+            for item in diag:
+                print(
+                    f"  {item['id']}, {item['rows']}, {item['is_target_intent']}, "
+                    f"{item['is_calibrator_intent']}, {item['name']}"
+                )
         raise RuntimeError(
             f"Could not resolve target field for source '{source_name}'. "
             "Provide --source_name matching the MS field name or update metadata extraction."
@@ -538,6 +596,14 @@ elif source_name:
                 f"Using source-matched fallback field id {field} ({selected_field_name})."
             )
         else:
+            diag = get_field_diagnostics(measurement_set)
+            if diag:
+                print("Field diagnostics (id, rows, target_intent, calibrator_intent, name):")
+                for item in diag:
+                    print(
+                        f"  {item['id']}, {item['rows']}, {item['is_target_intent']}, "
+                        f"{item['is_calibrator_intent']}, {item['name']}"
+                    )
             raise RuntimeError(
                 f"Resolved field '{selected_field_name}' (id={field}) does not match requested source '{source_name}'. "
                 "Refusing to run on a likely calibrator field. Set --source_name to the exact science field name in the MS."

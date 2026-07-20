@@ -322,36 +322,108 @@ def _first_target_scan(msmd, vis):
 
 
 def resolve_target_field_fallback(vis, source_name):
-    """Resolve a target field id when listfile name matching fails."""
+    """Resolve field id for source_name, refusing blind calibrator fallbacks."""
     try:
         from casatools import msmetadata
     except Exception:
         return None
 
+    row_counts = get_field_row_counts(vis)
+
+    def _normalize_name(value):
+        return "".join(ch.lower() for ch in str(value) if ch.isalnum())
+
+    def _matches_source(source, field_name):
+        src_norm = _normalize_name(source)
+        fld_norm = _normalize_name(field_name)
+        if not src_norm or not fld_norm:
+            return False
+        return src_norm == fld_norm or src_norm in fld_norm or fld_norm in src_norm
+
     msmd_local = msmetadata()
     try:
         msmd_local.open(vis)
+        field_names = list(msmd_local.fieldnames())
+
+        # Primary strategy: source_name must map to a field name with rows.
+        if source_name and field_names:
+            candidates = []
+            for idx, name in enumerate(field_names):
+                if _matches_source(source_name, name) and row_counts.get(idx, 0) > 0:
+                    candidates.append((row_counts.get(idx, 0), idx))
+            if candidates:
+                candidates.sort(reverse=True)
+                return str(candidates[0][1])
+
+            # Never blindly pick another field when a source name was requested.
+            return None
+
+        # Legacy fallback (only when source_name is missing): choose non-calibrator TARGET-like field.
         intents = [str(intent) for intent in msmd_local.intents()]
-        target_intents = [intent for intent in intents if "TARGET" in intent.upper()]
-        for intent in target_intents:
+        target_ids = set()
+        calibrator_ids = set()
+        for intent in intents:
             try:
-                field_ids = list(msmd_local.fieldsforintent(intent))
+                field_ids = [int(fid) for fid in list(msmd_local.fieldsforintent(intent))]
             except Exception:
                 continue
-            if field_ids:
-                return str(int(field_ids[0]))
+            upper_intent = intent.upper()
+            if "TARGET" in upper_intent:
+                target_ids.update(field_ids)
+            if any(tag in upper_intent for tag in ["CALIBRATE", "BANDPASS", "PHASE", "FLUX", "POINTING"]):
+                calibrator_ids.update(field_ids)
 
-        field_names = list(msmd_local.fieldnames())
-        if source_name and field_names:
-            for idx, name in enumerate(field_names):
-                if str(source_name) == str(name):
-                    return str(idx)
+        preferred = [fid for fid in sorted(target_ids) if fid not in calibrator_ids and row_counts.get(fid, 0) > 0]
+        if preferred:
+            preferred.sort(key=lambda fid: row_counts.get(fid, 0), reverse=True)
+            return str(preferred[0])
+
         return None
     finally:
         try:
             msmd_local.close()
         except Exception:
             pass
+
+
+def get_field_name_by_id(vis, field_id):
+    """Get field name for a numeric field id."""
+    if field_id is None:
+        return None
+    try:
+        from casatools import msmetadata
+    except Exception:
+        return None
+
+    try:
+        idx = int(field_id)
+    except Exception:
+        return None
+
+    msmd_local = msmetadata()
+    try:
+        msmd_local.open(vis)
+        field_names = list(msmd_local.fieldnames())
+        if 0 <= idx < len(field_names):
+            return str(field_names[idx])
+        return None
+    finally:
+        try:
+            msmd_local.close()
+        except Exception:
+            pass
+
+
+def source_matches_field_name(source_name, field_name):
+    """Fuzzy-safe source/field comparison for common naming variations."""
+    if not source_name or not field_name:
+        return False
+
+    src_norm = "".join(ch.lower() for ch in str(source_name) if ch.isalnum())
+    fld_norm = "".join(ch.lower() for ch in str(field_name) if ch.isalnum())
+    if not src_norm or not fld_norm:
+        return False
+    return src_norm == fld_norm or src_norm in fld_norm or fld_norm in src_norm
 
 
 def get_field_row_counts(vis):
@@ -400,6 +472,10 @@ def resolve_initial_split_field(vis, requested_field, source_name):
                 return str(fb_id)
         except Exception:
             pass
+
+    if source_name:
+        # Do not silently run on calibrator/full-MS when a science target was requested.
+        return None
 
     # Return first field id that has rows; this avoids null-selection failures.
     for field_id, count in sorted(row_counts.items()):
@@ -450,6 +526,22 @@ if field is None:
             f"Could not resolve target field for source '{source_name}'. "
             "Provide --source_name matching the MS field name or update metadata extraction."
         )
+elif source_name:
+    selected_field_name = get_field_name_by_id(measurement_set, field)
+    if not source_matches_field_name(source_name, selected_field_name):
+        fallback_field = resolve_target_field_fallback(measurement_set, source_name)
+        if fallback_field is not None:
+            field = fallback_field
+            selected_field_name = get_field_name_by_id(measurement_set, field)
+            print(
+                f"Warning: listfile-selected field did not match source '{source_name}'. "
+                f"Using source-matched fallback field id {field} ({selected_field_name})."
+            )
+        else:
+            raise RuntimeError(
+                f"Resolved field '{selected_field_name}' (id={field}) does not match requested source '{source_name}'. "
+                "Refusing to run on a likely calibrator field. Set --source_name to the exact science field name in the MS."
+            )
 
 # trim down df_store to just what user wants
 if split_band == "whole":
@@ -475,6 +567,11 @@ if not os.path.exists(measurement_set_target):
     print(f"Using datacolumn='{initial_datacolumn}' for initial target split")
     split_field = resolve_initial_split_field(measurement_set, field, source_name)
     if split_field is None:
+        if source_name:
+            raise RuntimeError(
+                f"Could not resolve a non-empty split field matching source '{source_name}'. "
+                "Refusing full-MS fallback to avoid calibrator-only runs."
+            )
         print("Warning: could not resolve a non-empty target field; splitting full MS without field selection.")
         split(vis=measurement_set, datacolumn=initial_datacolumn, outputvis=measurement_set_target)
     else:

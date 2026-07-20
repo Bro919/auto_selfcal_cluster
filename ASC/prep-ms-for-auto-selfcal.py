@@ -247,6 +247,9 @@ def patch_split_auto_selfcal_launcher(split_ms_directory):
     with open(launcher_path, "r", encoding="utf-8") as handle:
         content = handle.read()
 
+    if "import os" not in content and "import sys" in content:
+        content = content.replace("import sys", "import os\nimport sys", 1)
+
     marker = "# ASC split-dir path fix"
     if marker in content:
         return
@@ -254,6 +257,7 @@ def patch_split_auto_selfcal_launcher(split_ms_directory):
     target = 'sys.path.append(os.path.dirname(__file__)+"/..")'
     replacement = (
         "# ASC split-dir path fix\n"
+        "os.environ.setdefault('MPLBACKEND', 'Agg')\n"
         "_split_dir = os.path.dirname(os.path.abspath(__file__))\n"
         "if _split_dir not in sys.path:\n"
         "    sys.path.insert(0, _split_dir)\n"
@@ -267,7 +271,7 @@ def patch_split_auto_selfcal_launcher(split_ms_directory):
 
 
 def patch_split_auto_selfcal_intent_matching(split_ms_directory):
-    """Broaden intent matching in copied helper for datasets lacking OBSERVE_TARGET."""
+    """Harden copied helper scan selection for datasets lacking target intents."""
     helpers_path = os.path.join(split_ms_directory, "auto_selfcal", "selfcal_helpers.py")
     if not os.path.isfile(helpers_path):
         return
@@ -275,10 +279,43 @@ def patch_split_auto_selfcal_intent_matching(split_ms_directory):
     with open(helpers_path, "r", encoding="utf-8") as handle:
         content = handle.read()
 
-    if "*OBSERVE_TARGET*" not in content:
-        return
+    updated = content
 
-    updated = content.replace('"*OBSERVE_TARGET*"', '"*TARGET*"')
+    helper_marker = "def _first_target_scan(msmd, vis):"
+    helper_code = '''
+def _first_target_scan(msmd, vis):
+    """Return a usable scan id, preferring TARGET intents but tolerating missing intent metadata."""
+    for intent_pattern in ("*OBSERVE_TARGET*", "*TARGET*", "*OBSERVE*"):
+        try:
+            scans = msmd.scansforintent(intent_pattern)
+        except Exception:
+            continue
+        if len(scans) > 0:
+            return scans[0]
+
+    # Fall back to the first scan present in MAIN when intents are unavailable.
+    tb_local = casatools.table()
+    try:
+        tb_local.open(vis)
+        scan_numbers = tb_local.getcol("SCAN_NUMBER")
+    finally:
+        try:
+            tb_local.close()
+        except Exception:
+            pass
+
+    if len(scan_numbers) > 0:
+        return int(scan_numbers[0])
+
+    raise RuntimeError(f"No scans found in MS for target selection: {vis}")
+
+'''
+    if helper_marker not in updated and "msmdw = msmdWrapper()" in updated:
+        updated = updated.replace("msmdw = msmdWrapper()", helper_code + "msmdw = msmdWrapper()", 1)
+
+    updated = updated.replace('msmd.scansforintent("*OBSERVE_TARGET*")[0]', '_first_target_scan(msmd, vis)')
+    updated = updated.replace('msmd.scansforintent("*TARGET*")[0]', '_first_target_scan(msmd, vis)')
+
     if updated != content:
         with open(helpers_path, "w", encoding="utf-8") as handle:
             handle.write(updated)

@@ -274,6 +274,23 @@ def find_ms_directory(root_dir: Path) -> Optional[Path]:
     return nested[0] if nested else None
 
 
+def find_ms_candidates(root_dir: Path) -> list:
+    root_dir = Path(root_dir)
+    if not root_dir.is_dir():
+        return []
+    direct = [p for p in root_dir.iterdir() if p.is_dir() and p.name.endswith(".ms")]
+    nested = [p for p in root_dir.rglob("*") if p.is_dir() and p.name.endswith(".ms")]
+    merged = []
+    seen = set()
+    for candidate in direct + nested:
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        merged.append(candidate)
+    return merged
+
+
 def copy_tree(src: Path, dst: Path) -> None:
     src = Path(src)
     dst = Path(dst)
@@ -293,11 +310,59 @@ def copy_tree(src: Path, dst: Path) -> None:
             shutil.copy2(str(item), str(dest_item))
 
 
-def resolve_local_measurement_set(input_path: Path) -> Optional[Path]:
+def resolve_local_measurement_set(
+    input_path: Path,
+    project_code: Optional[str] = None,
+    object_name: Optional[str] = None,
+    observation_date: Optional[str] = None,
+    logger: Optional[logging.Logger] = None,
+) -> Optional[Path]:
     if is_ms_dir(input_path):
         return input_path
     if input_path.is_dir():
-        return find_ms_directory(input_path)
+        candidates = find_ms_candidates(input_path)
+        if not candidates:
+            return None
+
+        desired_name = None
+        if project_code and object_name and observation_date:
+            desired_name = f"{project_code}.{object_name}.{observation_date}.ms".lower()
+
+        object_token = (object_name or "").lower()
+        project_token = (project_code or "").lower()
+        date_token = (observation_date or "").lower()
+
+        def score(candidate: Path) -> Tuple[int, int, str]:
+            name = candidate.name.lower()
+            try:
+                depth = len(candidate.resolve().relative_to(input_path.resolve()).parts)
+            except Exception:
+                depth = 99
+
+            rank = 0
+            if desired_name and name == desired_name:
+                rank += 100
+            if object_token and object_token in name:
+                rank += 30
+            if project_token and project_token in name:
+                rank += 20
+            if date_token and date_token in name:
+                rank += 20
+            if "_target" in name:
+                rank += 5
+
+            return (-rank, depth, name)
+
+        ranked = sorted(candidates, key=score)
+        selected = ranked[0]
+        if logger:
+            logger.info("Selected local MS candidate: %s", selected)
+            if logger.isEnabledFor(logging.DEBUG) and len(ranked) > 1:
+                logger.debug(
+                    "Other MS candidates: %s",
+                    ", ".join(str(path) for path in ranked[1:5]),
+                )
+        return selected
     return None
 
 
@@ -382,9 +447,16 @@ def prepare_workdir_from_local_input(
     object_name: str,
     observation_date: str,
     asc_template: str,
+    logger: Optional[logging.Logger] = None,
 ) -> Path:
     workdir.mkdir(parents=True, exist_ok=False)
-    ms_source = resolve_local_measurement_set(input_path)
+    ms_source = resolve_local_measurement_set(
+        input_path,
+        project_code=project_code,
+        object_name=object_name,
+        observation_date=observation_date,
+        logger=logger,
+    )
     if ms_source is None:
         raise RuntimeError(
             f"Could not locate a measurement set under local path: {input_path}. "
@@ -828,6 +900,7 @@ def run_local_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
         build_object,
         build_date,
         args.asc,
+        logger=logger,
     )
 
     source_name = args.source_name or build_object

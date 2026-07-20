@@ -265,6 +265,57 @@ def patch_split_auto_selfcal_launcher(split_ms_directory):
         with open(launcher_path, "w", encoding="utf-8") as handle:
             handle.write(content)
 
+
+def patch_split_auto_selfcal_intent_matching(split_ms_directory):
+    """Broaden intent matching in copied helper for datasets lacking OBSERVE_TARGET."""
+    helpers_path = os.path.join(split_ms_directory, "auto_selfcal", "selfcal_helpers.py")
+    if not os.path.isfile(helpers_path):
+        return
+
+    with open(helpers_path, "r", encoding="utf-8") as handle:
+        content = handle.read()
+
+    if "*OBSERVE_TARGET*" not in content:
+        return
+
+    updated = content.replace('"*OBSERVE_TARGET*"', '"*TARGET*"')
+    if updated != content:
+        with open(helpers_path, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+
+
+def resolve_target_field_fallback(vis, source_name):
+    """Resolve a target field id when listfile name matching fails."""
+    try:
+        from casatools import msmetadata
+    except Exception:
+        return None
+
+    msmd_local = msmetadata()
+    try:
+        msmd_local.open(vis)
+        intents = [str(intent) for intent in msmd_local.intents()]
+        target_intents = [intent for intent in intents if "TARGET" in intent.upper()]
+        for intent in target_intents:
+            try:
+                field_ids = list(msmd_local.fieldsforintent(intent))
+            except Exception:
+                continue
+            if field_ids:
+                return str(int(field_ids[0]))
+
+        field_names = list(msmd_local.fieldnames())
+        if source_name and field_names:
+            for idx, name in enumerate(field_names):
+                if str(source_name) == str(name):
+                    return str(idx)
+        return None
+    finally:
+        try:
+            msmd_local.close()
+        except Exception:
+            pass
+
 # where things are
 ms_directory = os.path.dirname(measurement_set)
 auto_sc_files_directory = os.path.abspath(
@@ -296,6 +347,16 @@ listfile = ms_directory+"listfile.txt"
 listobs(vis=measurement_set, listfile=listfile, overwrite=True)
 print(f"Created listfile {listfile} \n")
 df_store, field = scrape_listfile(listfile, source_name)
+if field is None:
+    fallback_field = resolve_target_field_fallback(measurement_set, source_name)
+    if fallback_field is not None:
+        field = fallback_field
+        print(f"Warning: source '{source_name}' not found in listfile fields; using fallback field id {field} from MS metadata.")
+    else:
+        raise RuntimeError(
+            f"Could not resolve target field for source '{source_name}'. "
+            "Provide --source_name matching the MS field name or update metadata extraction."
+        )
 
 # trim down df_store to just what user wants
 if split_band == "whole":
@@ -341,6 +402,7 @@ for i in range(len(split_ms_directories)):
     if os.path.isdir(auto_sc_package_dir):
         shutil.copytree(auto_sc_package_dir, os.path.join(split_ms_directory, 'auto_selfcal'), dirs_exist_ok=True)
     patch_split_auto_selfcal_launcher(split_ms_directory)
+    patch_split_auto_selfcal_intent_matching(split_ms_directory)
 
     # write batch file
     job_base = f"auto_selfcal_{split_ms_name}"

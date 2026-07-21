@@ -100,7 +100,13 @@ def build_slurm_script(
     return "\n".join(header_lines + body_lines) + "\n"
 
 
-def build_casa_command(casa_executable, casa_script, use_execfile, ensure_user_site=False):
+def build_casa_command(
+    casa_executable,
+    casa_script,
+    use_execfile,
+    ensure_user_site=False,
+    preload_listobs=False,
+):
     quoted_casa = shlex.quote(casa_executable)
     prelude = ""
     if ensure_user_site:
@@ -111,6 +117,8 @@ def build_casa_command(casa_executable, casa_script, use_execfile, ensure_user_s
             ");"
             "sys.path.insert(0,_user_site) if _user_site not in sys.path else None;"
         )
+    if preload_listobs:
+        prelude += "from casatasks import listobs;"
     if use_execfile:
         python_code = f"{prelude}execfile({repr(casa_script)})"
     else:
@@ -203,6 +211,7 @@ if ENABLE_AUTO_IMAGE_FOLLOWUP:
             casa_script=f"{AUTO_IMAGE_DIR}/{AUTO_IMAGE_SCRIPT}",
             use_execfile=AUTO_IMAGE_USE_EXECFILE,
             ensure_user_site=AUTO_IMAGE_ENSURE_PANDAS,
+            preload_listobs=True,
         )
         auto_commands = [auto_image_command]
         if AUTO_IMAGE_ENSURE_PANDAS:

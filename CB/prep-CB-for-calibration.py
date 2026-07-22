@@ -105,7 +105,8 @@ def build_casa_command(
     casa_script,
     use_execfile,
     ensure_user_site=False,
-    preload_listobs=False,
+    preload_auto_image_tasks=False,
+    print_traceback=False,
 ):
     quoted_casa = shlex.quote(casa_executable)
     prelude = ""
@@ -117,12 +118,25 @@ def build_casa_command(
             ");"
             "sys.path.insert(0,_user_site) if _user_site not in sys.path else None;"
         )
-    if preload_listobs:
-        prelude += "from casatasks import listobs;"
+    if preload_auto_image_tasks:
+        prelude += "from casatasks import listobs,tclean,imfit,imstat,imhead;"
+
     if use_execfile:
-        python_code = f"{prelude}execfile({repr(casa_script)})"
+        exec_expr = f"execfile({repr(casa_script)})"
     else:
-        python_code = f"{prelude}exec(open({repr(casa_script)}).read())"
+        exec_expr = f"exec(open({repr(casa_script)}).read())"
+
+    if print_traceback:
+        python_code = (
+            f"{prelude}import traceback;"
+            "\ntry:\n"
+            f"    {exec_expr}\n"
+            "except Exception:\n"
+            "    traceback.print_exc()\n"
+            "    raise\n"
+        )
+    else:
+        python_code = f"{prelude}{exec_expr}"
     return f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
 
 
@@ -211,7 +225,8 @@ if ENABLE_AUTO_IMAGE_FOLLOWUP:
             casa_script=f"{AUTO_IMAGE_DIR}/{AUTO_IMAGE_SCRIPT}",
             use_execfile=AUTO_IMAGE_USE_EXECFILE,
             ensure_user_site=AUTO_IMAGE_ENSURE_PANDAS,
-            preload_listobs=True,
+            preload_auto_image_tasks=True,
+            print_traceback=True,
         )
         auto_commands = [auto_image_command]
         if AUTO_IMAGE_ENSURE_PANDAS:

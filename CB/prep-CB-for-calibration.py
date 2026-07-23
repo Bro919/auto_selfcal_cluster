@@ -124,7 +124,8 @@ def build_casa_command(
     if use_execfile:
         exec_expr = f"execfile({repr(casa_script)})"
     else:
-        exec_expr = f"exec(open({repr(casa_script)}).read())"
+        # run_path preserves __file__ for scripts that use path-relative imports/resources.
+        exec_expr = f"import runpy;runpy.run_path({repr(casa_script)}, init_globals=globals(), run_name='__main__')"
 
     if print_traceback:
         python_code = (

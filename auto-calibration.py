@@ -1,24 +1,36 @@
 #!/usr/bin/env python3
 
 import argparse
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Orchestrate CB build/prep and ASC auto-selfcal preparation using the CB .ms output."
+            "Run CB, ASC, or CB->ASC calibration workflows from one entrypoint."
         )
     )
-    parser.add_argument("project_code", help="Project code, e.g. 23A-241")
-    parser.add_argument("object_name", help="Object name, e.g. AT2019ehz")
-    parser.add_argument("cb_input", nargs="?", help="URL or local path to the CB dataset when not skipping CB build/prep")
+    parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
+    parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
+    parser.add_argument("cb_input", nargs="?", help="URL or local path to the CB dataset when running CB build/prep")
+    parser.add_argument(
+        "--pipeline",
+        default="cb-asc",
+        choices=["cb", "asc", "cb-asc", "auto-image"],
+        help="Pipeline mode: cb, asc, cb-asc, or auto-image (default: cb-asc)",
+    )
     parser.add_argument("--observation-date", help="Observation date, e.g. 2023-07-22")
     parser.add_argument("--cb-url", dest="cb_url", help="URL or local path to the CB dataset when not skipping CB build/prep")
     parser.add_argument("--cb-workdir", help="Existing CB working directory to use instead of running build/prep")
+    parser.add_argument(
+        "--asc-ms-path",
+        help="Path to a local .ms directory or parent directory containing one for ASC-only mode",
+    )
     parser.add_argument("--skip-cb", action="store_true", help="Skip CB build/prep and use --cb-workdir directly")
     parser.add_argument("--cb-template", default="CB", help="Path to the CB template directory")
     parser.add_argument(
@@ -48,6 +60,42 @@ def parse_args():
         "--cb-dry-run",
         action="store_true",
         help="Dry-run the CB workflow without executing build/prep/submission.",
+    )
+    parser.add_argument(
+        "--cb-no-wait",
+        action="store_true",
+        help="Do not wait for submitted CB SLURM jobs to complete before starting ASC in cb-asc mode.",
+    )
+    parser.add_argument(
+        "--cb-wait-poll-seconds",
+        type=int,
+        default=60,
+        help="Polling interval in seconds when waiting for CB SLURM completion (default: 60).",
+    )
+
+    parser.add_argument(
+        "--auto-image-workdir",
+        help="Existing working directory containing auto-image-VLA and config.yaml for standalone auto-image mode.",
+    )
+    parser.add_argument(
+        "--auto-image-submit",
+        action="store_true",
+        help="Submit auto-image via sbatch run_auto_image.sh instead of running CASA directly.",
+    )
+    parser.add_argument(
+        "--auto-image-casa-executable",
+        default="casa-pipe",
+        help="CASA executable to use for standalone auto-image direct runs.",
+    )
+    parser.add_argument(
+        "--auto-image-dry-run",
+        action="store_true",
+        help="Dry-run standalone auto-image mode without executing commands.",
+    )
+    parser.add_argument(
+        "--auto-image-ensure-pandas",
+        action="store_true",
+        help="Deprecated: pandas install now always runs before direct auto-image execution.",
     )
 
     parser.add_argument("--asc-source-name", help="Source name to write into ASC prep script")
@@ -153,13 +201,186 @@ def infer_metadata_from_workdir(cb_workdir: Path):
     return None
 
 
-def run_subprocess(command, cwd: Path) -> None:
+def run_subprocess(command, cwd: Path) -> subprocess.CompletedProcess:
     print("Running:")
     print(" ".join(str(arg) for arg in command))
-    subprocess.run(command, cwd=cwd, check=True)
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+    if result.stdout:
+        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="" if result.stderr.endswith("\n") else "\n")
+    return result
 
 
-def run_cb_workflow(args: argparse.Namespace) -> Path:
+def extract_submitted_job_ids(text: str):
+    return re.findall(r"Submitted\s+batch\s+job\s+(\d+)", text or "")
+
+
+def parse_state_token(state_value: str) -> str:
+    cleaned = (state_value or "").strip().upper()
+    if not cleaned:
+        return ""
+    # Slurm may report forms like COMPLETED+, FAILED (exit code ...), etc.
+    cleaned = cleaned.split()[0]
+    cleaned = cleaned.split("+")[0]
+    return cleaned
+
+
+def get_slurm_job_state(job_id: str) -> str:
+    sacct_cmd = ["sacct", "-j", str(job_id), "--format=State", "--noheader", "--parsable2"]
+    try:
+        sacct_result = subprocess.run(
+            sacct_cmd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+    except OSError:
+        sacct_result = None
+
+    if sacct_result and sacct_result.returncode == 0:
+        states = []
+        for line in sacct_result.stdout.splitlines():
+            token = parse_state_token(line.split("|", 1)[0] if "|" in line else line)
+            if token:
+                states.append(token)
+        terminal_priority = [
+            "FAILED",
+            "CANCELLED",
+            "TIMEOUT",
+            "OUT_OF_MEMORY",
+            "NODE_FAIL",
+            "PREEMPTED",
+            "COMPLETED",
+        ]
+        for candidate in terminal_priority:
+            if candidate in states:
+                return candidate
+        if states:
+            return states[-1]
+
+    squeue_cmd = ["squeue", "-j", str(job_id), "-h", "-o", "%T"]
+    try:
+        squeue_result = subprocess.run(
+            squeue_cmd,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+    except OSError:
+        return "UNKNOWN"
+
+    if squeue_result.returncode == 0:
+        state_text = squeue_result.stdout.strip()
+        if state_text:
+            return parse_state_token(state_text.splitlines()[0])
+        return "PENDING_ACCOUNTING"
+
+    return "UNKNOWN"
+
+
+def wait_for_slurm_job_completion(job_id: str, poll_seconds: int) -> None:
+    success_states = {"COMPLETED"}
+    failure_states = {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED"}
+
+    interval = max(5, int(poll_seconds))
+    print(f"Waiting for CB SLURM job {job_id} to complete before launching ASC...")
+    while True:
+        state = get_slurm_job_state(job_id)
+        print(f"CB job {job_id} state: {state}")
+        if state in success_states:
+            print(f"CB SLURM job {job_id} completed successfully.")
+            return
+        if state in failure_states:
+            sys.exit(f"Error: CB SLURM job {job_id} ended with state {state}; ASC will not start.")
+        time.sleep(interval)
+
+
+def run_auto_image_workflow(args: argparse.Namespace) -> None:
+    script_dir = Path(__file__).resolve().parent
+    workdir_input = args.auto_image_workdir or args.cb_workdir
+    if not workdir_input:
+        sys.exit("Error: auto-image mode requires --auto-image-workdir (or --cb-workdir).")
+
+    workdir = Path(workdir_input).expanduser()
+    if not workdir.is_absolute():
+        workdir = script_dir / workdir
+    workdir = workdir.resolve()
+
+    if not workdir.exists() or not workdir.is_dir():
+        sys.exit(f"Error: auto-image workdir not found: {workdir}")
+
+    auto_image_dir = workdir / "auto-image-VLA"
+    config_path = auto_image_dir / "config.yaml"
+    auto_image_script = auto_image_dir / "run-auto-image.py"
+
+    if args.auto_image_submit:
+        submit_script = workdir / "run_auto_image.sh"
+        if not submit_script.exists():
+            sys.exit(
+                f"Error: expected auto-image submit script not found: {submit_script}. "
+                "Generate it via CB prep first, or run direct mode without --auto-image-submit."
+            )
+
+        cmd = ["sbatch", str(submit_script)]
+        if args.auto_image_dry_run or args.dry_run:
+            print("Auto-image dry run enabled; the following command would be executed:")
+            print(" ".join(cmd))
+            return
+
+        run_subprocess(cmd, cwd=workdir)
+        print("Standalone auto-image sbatch submission completed.")
+        return
+
+    if not auto_image_script.exists():
+        sys.exit(f"Error: auto-image script not found: {auto_image_script}")
+    if not config_path.exists():
+        sys.exit(f"Error: auto-image config not found: {config_path}")
+
+    casa_executable = args.auto_image_casa_executable
+    commands = []
+    install_code = (
+        "import subprocess,sys;"
+        "print(f'Installing pandas into CASA Python: {sys.executable}');"
+        "subprocess.run([sys.executable,'-m','pip','install','--user','pandas'],check=True)"
+    )
+    commands.append([casa_executable, "--nogui", "-c", install_code])
+
+    run_code = (
+        "import os,sys;"
+        "_user_site=os.path.expanduser(f'~/.local/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages');"
+        "sys.path.insert(0,_user_site) if _user_site not in sys.path else None;"
+        "from casatasks import listobs,tclean,imfit,imstat,imhead;"
+        "import runpy;runpy.run_path('run-auto-image.py', init_globals=globals(), run_name='__main__')"
+    )
+    commands.append([casa_executable, "--nogui", "-c", run_code])
+
+    if args.auto_image_dry_run or args.dry_run:
+        print("Auto-image dry run enabled; the following command(s) would be executed:")
+        for command in commands:
+            print(" ".join(str(arg) for arg in command))
+        return
+
+    for command in commands:
+        run_subprocess(command, cwd=auto_image_dir)
+
+    print("Standalone auto-image direct run completed.")
+
+
+def list_cb_workdirs(script_dir: Path):
+    return {p.resolve() for p in script_dir.glob("working.*") if p.is_dir()}
+
+
+def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
     script_dir = Path(__file__).resolve().parent
     cb_script = script_dir / "run_build_and_prep_CB.py"
     if not cb_script.exists():
@@ -182,20 +403,25 @@ def run_cb_workflow(args: argparse.Namespace) -> Path:
             if not args.observation_date:
                 args.observation_date = observation_date
 
-        if not args.observation_date:
-            sys.exit("Error: --observation-date is required when skipping CB build/prep unless it can be inferred from --cb-workdir.")
-
         print(f"Skipping CB build/prep and using existing workdir: {cb_workdir}")
-        return cb_workdir
+        return cb_workdir, None
 
     cb_url = args.cb_input or args.cb_url
     if not cb_url:
         sys.exit("Error: cb_input or --cb-url must be provided unless --skip-cb is used.")
-    if not args.observation_date:
-        sys.exit("Error: --observation-date is required for CB build/prep.")
 
-    cb_workdir = compute_cb_workdir(args.project_code, args.object_name, args.observation_date)
-    cmd = [sys.executable, str(cb_script), args.project_code, args.object_name, cb_url, args.observation_date]
+    cb_workdir = None
+    if args.project_code and args.object_name and args.observation_date:
+        cb_workdir = compute_cb_workdir(args.project_code, args.object_name, args.observation_date)
+
+    cmd = [sys.executable, str(cb_script)]
+    if args.project_code:
+        cmd.append(f"project_code={args.project_code}")
+    if args.object_name:
+        cmd.append(f"object_name={args.object_name}")
+    if args.observation_date:
+        cmd.append(f"observation_date={args.observation_date}")
+    cmd.extend(["--url", cb_url])
     cmd.extend(["--cb", args.cb_template])
     cmd.extend(["--auto-image-vla", args.cb_auto_image_vla])
     if args.cb_temp_dir:
@@ -212,13 +438,25 @@ def run_cb_workflow(args: argparse.Namespace) -> Path:
     if args.dry_run:
         print("CB dry run enabled; the following command would be executed:")
         print(" ".join(str(arg) for arg in cmd))
-        return cb_workdir
+        return (cb_workdir if cb_workdir is not None else Path("working.unknown.unknown.unknown"), None)
 
-    run_subprocess(cmd, cwd=script_dir)
+    before_workdirs = list_cb_workdirs(script_dir)
+    result = run_subprocess(cmd, cwd=script_dir)
+    after_workdirs = list_cb_workdirs(script_dir)
+    submitted_job_ids = extract_submitted_job_ids((result.stdout or "") + "\n" + (result.stderr or ""))
+    final_job_id = submitted_job_ids[-1] if submitted_job_ids else None
 
-    if not cb_workdir.exists():
-        raise FileNotFoundError(f"Expected CB workdir not found after build: {cb_workdir}")
-    return cb_workdir
+    if cb_workdir is not None and cb_workdir.exists():
+        return cb_workdir, final_job_id
+
+    created = sorted(after_workdirs - before_workdirs)
+    if len(created) == 1:
+        return created[0], final_job_id
+    if len(created) > 1:
+        # Prefer the most recently modified workdir when multiple are created.
+        return max(created, key=lambda p: p.stat().st_mtime), final_job_id
+
+    raise FileNotFoundError("Could not determine CB workdir after build. Provide metadata explicitly or use --cb-workdir.")
 
 
 def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
@@ -227,7 +465,13 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
     if not asc_script.exists():
         raise FileNotFoundError(f"Could not find ASC wrapper script: {asc_script}")
 
-    cmd = [sys.executable, str(asc_script), args.project_code, args.object_name, args.observation_date]
+    cmd = [sys.executable, str(asc_script)]
+    if args.project_code:
+        cmd.append(f"project_code={args.project_code}")
+    if args.object_name:
+        cmd.append(f"object_name={args.object_name}")
+    if args.observation_date:
+        cmd.append(f"observation_date={args.observation_date}")
     cmd.extend(["--ms-path", str(ms_path)])
     cmd.extend(["--asc", args.asc_template])
     if args.asc_source_name:
@@ -263,6 +507,7 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
 
 def main() -> None:
     args = parse_args()
+    pipeline = args.pipeline
 
     if args.dry_run:
         args.cb_dry_run = True
@@ -271,11 +516,45 @@ def main() -> None:
     if args.skip_cb and not args.cb_workdir:
         sys.exit("Error: --skip-cb requires --cb-workdir.")
 
-    cb_workdir = run_cb_workflow(args)
+    if pipeline == "cb":
+        run_cb_workflow(args)
+        print("CB pipeline completed successfully.")
+        return
+
+    if pipeline == "auto-image":
+        run_auto_image_workflow(args)
+        return
+
+    if pipeline == "asc":
+        asc_source = Path(args.asc_ms_path).expanduser() if args.asc_ms_path else None
+        if asc_source is None and args.cb_workdir:
+            asc_source = Path(args.cb_workdir).expanduser()
+        if asc_source is None:
+            sys.exit("Error: ASC mode requires --asc-ms-path or --cb-workdir.")
+
+        ms_path = find_ms_directory(asc_source)
+        if ms_path is None:
+            sys.exit(f"Error: Could not locate a .ms measurement set under {asc_source}.")
+
+        print(f"Found ASC input measurement set: {ms_path}")
+        run_asc_workflow(args, ms_path)
+        print("ASC pipeline completed successfully.")
+        return
+
+    cb_workdir, cb_final_job_id = run_cb_workflow(args)
 
     if args.dry_run:
         print("Dry-run complete. No ASC workflow was executed because the wrapper is in dry-run mode.")
         return
+
+    if args.cb_submit and not args.cb_no_wait:
+        if cb_final_job_id:
+            wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds)
+        else:
+            sys.exit(
+                "Error: CB submission was requested but no SLURM job ID was detected from CB output. "
+                "Use --cb-no-wait to bypass wait logic, or inspect CB submit output."
+            )
 
     ms_path = find_ms_directory(cb_workdir)
     if ms_path is None:
@@ -283,7 +562,7 @@ def main() -> None:
 
     print(f"Found CB measurement set for ASC input: {ms_path}")
     run_asc_workflow(args, ms_path)
-    print("Combined auto-calibration workflow completed successfully.")
+    print("Combined CB->ASC auto-calibration workflow completed successfully.")
 
 
 if __name__ == "__main__":

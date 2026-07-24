@@ -130,14 +130,10 @@ def build_casa_command(
             exec_expr = (
                 f"import os,runpy;"
                 f"_script={repr(casa_script)};"
-                "_old_cwd=os.getcwd();"
                 "_script_dir=os.path.dirname(_script) or '.';"
                 "_script_name=os.path.basename(_script);"
                 "os.chdir(_script_dir);"
-                "\ntry:\n"
-                "    runpy.run_path(_script_name, init_globals=globals(), run_name='__main__')\n"
-                "finally:\n"
-                "    os.chdir(_old_cwd)\n"
+                "runpy.run_path(_script_name, init_globals=globals(), run_name='__main__')"
             )
         else:
             exec_expr = f"import runpy;runpy.run_path({repr(casa_script)}, init_globals=globals(), run_name='__main__')"

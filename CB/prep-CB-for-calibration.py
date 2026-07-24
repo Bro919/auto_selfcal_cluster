@@ -107,6 +107,7 @@ def build_casa_command(
     ensure_user_site=False,
     preload_auto_image_tasks=False,
     print_traceback=False,
+    run_in_script_dir=False,
 ):
     quoted_casa = shlex.quote(casa_executable)
     prelude = ""
@@ -125,7 +126,21 @@ def build_casa_command(
         exec_expr = f"execfile({repr(casa_script)})"
     else:
         # run_path preserves __file__ for scripts that use path-relative imports/resources.
-        exec_expr = f"import runpy;runpy.run_path({repr(casa_script)}, init_globals=globals(), run_name='__main__')"
+        if run_in_script_dir:
+            exec_expr = (
+                f"import os,runpy;"
+                f"_script={repr(casa_script)};"
+                "_old_cwd=os.getcwd();"
+                "_script_dir=os.path.dirname(_script) or '.';"
+                "_script_name=os.path.basename(_script);"
+                "os.chdir(_script_dir);"
+                "\ntry:\n"
+                "    runpy.run_path(_script_name, init_globals=globals(), run_name='__main__')\n"
+                "finally:\n"
+                "    os.chdir(_old_cwd)\n"
+            )
+        else:
+            exec_expr = f"import runpy;runpy.run_path({repr(casa_script)}, init_globals=globals(), run_name='__main__')"
 
     if print_traceback:
         python_code = (
@@ -228,6 +243,7 @@ if ENABLE_AUTO_IMAGE_FOLLOWUP:
             ensure_user_site=AUTO_IMAGE_ENSURE_PANDAS,
             preload_auto_image_tasks=True,
             print_traceback=True,
+            run_in_script_dir=True,
         )
         auto_commands = [auto_image_command]
         if AUTO_IMAGE_ENSURE_PANDAS:

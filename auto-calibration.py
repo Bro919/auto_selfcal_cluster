@@ -19,6 +19,8 @@ def parse_args():
     parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
     parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
     parser.add_argument("cb_input", nargs="?", help="URL or local path to the CB dataset when running CB build/prep")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output and command tracing")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output to essential status/error messages")
     parser.add_argument(
         "--pipeline",
         default="cb-asc",
@@ -202,9 +204,10 @@ def infer_metadata_from_workdir(cb_workdir: Path):
     return None
 
 
-def run_subprocess(command, cwd: Path) -> subprocess.CompletedProcess:
-    print("Running:")
-    print(" ".join(str(arg) for arg in command), flush=True)
+def run_subprocess(command, cwd: Path, quiet: bool = False, verbose: bool = False) -> subprocess.CompletedProcess:
+    if verbose and not quiet:
+        print("Running:")
+        print(" ".join(str(arg) for arg in command), flush=True)
 
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
@@ -223,7 +226,8 @@ def run_subprocess(command, cwd: Path) -> subprocess.CompletedProcess:
     assert process.stdout is not None
     for line in process.stdout:
         output_chunks.append(line)
-        print(line, end="", flush=True)
+        if not quiet:
+            print(line, end="", flush=True)
 
     return_code = process.wait()
     combined_output = "".join(output_chunks)
@@ -234,6 +238,8 @@ def run_subprocess(command, cwd: Path) -> subprocess.CompletedProcess:
         stderr="",
     )
     if return_code != 0:
+        if quiet and combined_output:
+            print(combined_output, file=sys.stderr, end="" if combined_output.endswith("\n") else "\n")
         raise subprocess.CalledProcessError(return_code, command, output=combined_output, stderr="")
     return result
 
@@ -328,15 +334,17 @@ def get_slurm_job_state(job_id: str) -> str:
     return "UNKNOWN"
 
 
-def wait_for_slurm_job_completion(job_id: str, poll_seconds: int) -> None:
+def wait_for_slurm_job_completion(job_id: str, poll_seconds: int, quiet: bool = False) -> None:
     success_states = {"COMPLETED"}
     failure_states = {"FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL", "PREEMPTED"}
 
     interval = max(5, int(poll_seconds))
-    print(f"Waiting for CB SLURM job {job_id} to complete before launching ASC...")
+    if not quiet:
+        print(f"Waiting for CB SLURM job {job_id} to complete before launching ASC...")
     while True:
         state = get_slurm_job_state(job_id)
-        print(f"CB job {job_id} state: {state}")
+        if not quiet:
+            print(f"CB job {job_id} state: {state}")
         if state in success_states:
             print(f"CB SLURM job {job_id} completed successfully.")
             return
@@ -377,7 +385,7 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
             print(" ".join(cmd))
             return
 
-        run_subprocess(cmd, cwd=workdir)
+        run_subprocess(cmd, cwd=workdir, quiet=args.quiet, verbose=args.verbose)
         print("Standalone auto-image sbatch submission completed.")
         return
 
@@ -411,7 +419,7 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
         return
 
     for command in commands:
-        run_subprocess(command, cwd=auto_image_dir)
+        run_subprocess(command, cwd=auto_image_dir, quiet=args.quiet, verbose=args.verbose)
 
     print("Standalone auto-image direct run completed.")
 
@@ -464,6 +472,10 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
     cmd.extend(["--url", cb_url])
     cmd.extend(["--cb", args.cb_template])
     cmd.extend(["--auto-image-vla", args.cb_auto_image_vla])
+    if args.verbose:
+        cmd.append("--verbose")
+    if args.quiet:
+        cmd.append("--quiet")
     if args.cb_temp_dir:
         cmd.extend(["--temp-dir", args.cb_temp_dir])
     if not args.cb_submit:
@@ -481,7 +493,7 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
         return (cb_workdir if cb_workdir is not None else Path("working.unknown.unknown.unknown"), None)
 
     before_workdirs = list_cb_workdirs(script_dir)
-    result = run_subprocess(cmd, cwd=script_dir)
+    result = run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
     after_workdirs = list_cb_workdirs(script_dir)
     submitted_job_ids = extract_submitted_job_ids((result.stdout or "") + "\n" + (result.stderr or ""))
     final_job_id = submitted_job_ids[-1] if submitted_job_ids else None
@@ -514,6 +526,10 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
         cmd.append(f"observation_date={args.observation_date}")
     cmd.extend(["--ms-path", str(ms_path)])
     cmd.extend(["--asc", args.asc_template])
+    if args.verbose:
+        cmd.append("--verbose")
+    if args.quiet:
+        cmd.append("--quiet")
     if args.asc_source_name:
         cmd.extend(["--source_name", args.asc_source_name])
     if args.asc_split_band:
@@ -542,12 +558,15 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
         print(" ".join(str(arg) for arg in cmd))
         return
 
-    run_subprocess(cmd, cwd=script_dir)
+    run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
 
 
 def main() -> None:
     args = parse_args()
     pipeline = args.pipeline
+
+    if args.quiet and args.verbose:
+        sys.exit("Error: --quiet and --verbose cannot be used together.")
 
     if args.dry_run:
         args.cb_dry_run = True
@@ -567,7 +586,7 @@ def main() -> None:
             print("CB submission includes auto-image chaining via Slurm dependency.")
             if not args.cb_no_wait:
                 if cb_final_job_id:
-                    wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds)
+                    wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds, quiet=args.quiet)
                 else:
                     sys.exit(
                         "Error: CB submission was requested but no SLURM job ID was detected from CB output. "
@@ -611,7 +630,7 @@ def main() -> None:
 
     if args.cb_submit and not args.cb_no_wait:
         if cb_final_job_id:
-            wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds)
+            wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds, quiet=args.quiet)
         else:
             sys.exit(
                 "Error: CB submission was requested but no SLURM job ID was detected from CB output. "

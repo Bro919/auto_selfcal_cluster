@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -203,19 +204,37 @@ def infer_metadata_from_workdir(cb_workdir: Path):
 
 def run_subprocess(command, cwd: Path) -> subprocess.CompletedProcess:
     print("Running:")
-    print(" ".join(str(arg) for arg in command))
-    result = subprocess.run(
+    print(" ".join(str(arg) for arg in command), flush=True)
+
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+
+    process = subprocess.Popen(
         command,
         cwd=cwd,
-        check=True,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         universal_newlines=True,
+        bufsize=1,
+        env=env,
     )
-    if result.stdout:
-        print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
-    if result.stderr:
-        print(result.stderr, file=sys.stderr, end="" if result.stderr.endswith("\n") else "\n")
+
+    output_chunks = []
+    assert process.stdout is not None
+    for line in process.stdout:
+        output_chunks.append(line)
+        print(line, end="", flush=True)
+
+    return_code = process.wait()
+    combined_output = "".join(output_chunks)
+    result = subprocess.CompletedProcess(
+        args=command,
+        returncode=return_code,
+        stdout=combined_output,
+        stderr="",
+    )
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, command, output=combined_output, stderr="")
     return result
 
 
@@ -252,18 +271,39 @@ def get_slurm_job_state(job_id: str) -> str:
             token = parse_state_token(line.split("|", 1)[0] if "|" in line else line)
             if token:
                 states.append(token)
-        terminal_priority = [
+        failure_states = {
             "FAILED",
             "CANCELLED",
             "TIMEOUT",
             "OUT_OF_MEMORY",
             "NODE_FAIL",
             "PREEMPTED",
-            "COMPLETED",
-        ]
-        for candidate in terminal_priority:
+            "BOOT_FAIL",
+            "DEADLINE",
+        }
+        active_states = {
+            "PENDING",
+            "RUNNING",
+            "CONFIGURING",
+            "COMPLETING",
+            "RESIZING",
+            "SUSPENDED",
+            "SIGNALING",
+            "STAGE_OUT",
+            "REQUEUED",
+            "REQUEUE_FED",
+        }
+
+        # sacct can include multiple entries for one job id (job, batch, extern).
+        # Never treat the job as complete while any active state is still present.
+        for candidate in failure_states:
             if candidate in states:
                 return candidate
+        for candidate in active_states:
+            if candidate in states:
+                return candidate
+        if "COMPLETED" in states:
+            return "COMPLETED"
         if states:
             return states[-1]
 
@@ -517,8 +557,30 @@ def main() -> None:
         sys.exit("Error: --skip-cb requires --cb-workdir.")
 
     if pipeline == "cb":
-        run_cb_workflow(args)
-        print("CB pipeline completed successfully.")
+        cb_workdir, cb_final_job_id = run_cb_workflow(args)
+
+        if args.dry_run:
+            print("CB dry-run complete.")
+            return
+
+        if args.cb_submit and not args.cb_submit_dry_run:
+            print("CB submission includes auto-image chaining via Slurm dependency.")
+            if not args.cb_no_wait:
+                if cb_final_job_id:
+                    wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds)
+                else:
+                    sys.exit(
+                        "Error: CB submission was requested but no SLURM job ID was detected from CB output. "
+                        "Use --cb-no-wait to bypass wait logic, or inspect CB submit output."
+                    )
+            print("CB pipeline and chained auto-image completed successfully.")
+            return
+
+        print("Running standalone auto-image after CB workflow completion.")
+        args.auto_image_workdir = str(cb_workdir)
+        args.auto_image_submit = False
+        run_auto_image_workflow(args)
+        print("CB pipeline completed successfully (including standalone auto-image).")
         return
 
     if pipeline == "auto-image":

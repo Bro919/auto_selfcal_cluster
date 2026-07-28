@@ -622,6 +622,16 @@ def main() -> None:
         print("ASC pipeline completed successfully.")
         return
 
+    if pipeline == "cb-asc":
+        if not args.cb_submit and not args.skip_cb:
+            print("CB-ASC mode requires CB submission; enabling --cb-submit automatically.")
+            args.cb_submit = True
+        if args.cb_submit_dry_run and not args.dry_run:
+            sys.exit(
+                "Error: --cb-submit-dry-run cannot be used with cb-asc execution because ASC requires real CB outputs. "
+                "Use --dry-run for full wrapper preview, or remove --cb-submit-dry-run."
+            )
+
     cb_workdir, cb_final_job_id = run_cb_workflow(args)
 
     if args.dry_run:
@@ -639,6 +649,11 @@ def main() -> None:
 
     ms_path = find_ms_directory(cb_workdir)
     if ms_path is None:
+        if args.cb_submit and args.cb_no_wait:
+            sys.exit(
+                f"Error: CB output .ms is not available yet in {cb_workdir}. "
+                "You used --cb-no-wait, so ASC started before CB finished. Remove --cb-no-wait to enforce dependency waiting."
+            )
         sys.exit(f"Error: Could not locate a .ms measurement set inside the CB workdir {cb_workdir}.")
 
     print(f"Found CB measurement set for ASC input: {ms_path}")

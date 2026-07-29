@@ -4,6 +4,7 @@ import argparse
 from collections import deque
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -60,6 +61,15 @@ def parse_args():
         type=int,
         default=60,
         help="Polling interval in seconds when waiting for CB SLURM completion (default: 60).",
+    )
+    parser.add_argument(
+        "--cb-asc-wait-for-cb",
+        action="store_true",
+        help=(
+            "In cb-asc mode with --cb-submit, wait in the foreground for CB completion "
+            "before launching ASC. Default behavior submits ASC with a Slurm dependency "
+            "and exits immediately."
+        ),
     )
 
     parser.add_argument(
@@ -627,6 +637,22 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
     if not asc_script.exists():
         raise FileNotFoundError(f"Could not find ASC wrapper script: {asc_script}")
 
+    cmd = build_asc_local_command(args, ms_path=ms_path, script_dir=script_dir)
+
+    if args.dry_run:
+        print("ASC dry run enabled; the following command would be executed:")
+        print(" ".join(str(arg) for arg in cmd))
+        return
+
+    run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
+
+
+def build_asc_local_command(args: argparse.Namespace, ms_path: Path, script_dir: Path) -> list:
+    asc_script = script_dir / "run_build_and_prep_ASC.py"
+    asc_template = Path(args.asc_template).expanduser()
+    if not asc_template.is_absolute():
+        asc_template = (script_dir / asc_template).resolve()
+
     cmd = [sys.executable, str(asc_script)]
     if args.project_code:
         cmd.append(f"project_code={args.project_code}")
@@ -634,8 +660,8 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
         cmd.append(f"object_name={args.object_name}")
     if args.observation_date:
         cmd.append(f"observation_date={args.observation_date}")
-    cmd.extend(["--ms-path", str(ms_path)])
-    cmd.extend(["--asc", args.asc_template])
+    cmd.extend(["--ms-path", str(ms_path.resolve())])
+    cmd.extend(["--asc", str(asc_template)])
     if args.verbose:
         cmd.append("--verbose")
     if args.quiet:
@@ -653,7 +679,10 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
     if args.asc_a_config:
         cmd.append("--a_config")
     if args.asc_auto_sc_dir:
-        cmd.extend(["--auto_sc_dir", args.asc_auto_sc_dir])
+        auto_sc_dir = Path(args.asc_auto_sc_dir).expanduser()
+        if not auto_sc_dir.is_absolute():
+            auto_sc_dir = (script_dir / auto_sc_dir).resolve()
+        cmd.extend(["--auto_sc_dir", str(auto_sc_dir)])
     if args.asc_no_casa:
         cmd.append("--no-run-casa")
     if args.asc_skip_submit:
@@ -663,12 +692,47 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
     if args.asc_casa_executable != "casa":
         cmd.extend(["--casa-executable", args.asc_casa_executable])
 
-    if args.dry_run:
-        print("ASC dry run enabled; the following command would be executed:")
-        print(" ".join(str(arg) for arg in cmd))
-        return
+    return cmd
 
-    run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
+
+def submit_dependent_asc_job(args: argparse.Namespace, cb_workdir: Path, cb_final_job_id: str) -> str:
+    script_dir = Path(__file__).resolve().parent
+    cmd = build_asc_local_command(args, ms_path=cb_workdir, script_dir=script_dir)
+
+    launcher_path = script_dir / "submit_asc_after_cb.sh"
+    command_str = " ".join(shlex.quote(str(part)) for part in cmd)
+    launcher_path.write_text(
+        "#!/bin/bash\n"
+        "#SBATCH --job-name=cb_asc_followup\n"
+        "#SBATCH --output=cb_asc_followup.%j.out\n"
+        "#SBATCH --error=cb_asc_followup.%j.err\n"
+        f"#SBATCH --chdir={script_dir}\n\n"
+        "set -euo pipefail\n"
+        f"{command_str}\n",
+        encoding="utf-8",
+    )
+
+    submit_cmd = [
+        "sbatch",
+        "--dependency",
+        f"afterok:{cb_final_job_id}",
+        str(launcher_path),
+    ]
+    result = subprocess.run(
+        submit_cmd,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+
+    stdout_text = (result.stdout or "").strip()
+    stderr_text = (result.stderr or "").strip()
+    if stderr_text:
+        print(stderr_text, file=sys.stderr)
+
+    submitted_ids = extract_submitted_job_ids(stdout_text)
+    return submitted_ids[-1] if submitted_ids else ""
 
 
 def run_asc_remote_workflow(args: argparse.Namespace, source_url: str) -> None:
@@ -799,13 +863,34 @@ def main() -> None:
         return
 
     if args.cb_submit:
-        if cb_final_job_id:
-            wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_seconds, quiet=args.quiet)
-        else:
+        if not cb_final_job_id:
             sys.exit(
                 "Error: CB submission was requested but no SLURM job ID was detected from CB output. "
                 "Inspect CB submit output and Slurm status."
             )
+        if not args.cb_asc_wait_for_cb:
+            try:
+                asc_job_id = submit_dependent_asc_job(args, cb_workdir, cb_final_job_id)
+            except subprocess.CalledProcessError as exc:
+                sys.exit(
+                    "Error: Failed to submit ASC follow-up job with dependency on CB. "
+                    f"sbatch exited with code {exc.returncode}."
+                )
+
+            if asc_job_id:
+                print(
+                    f"Submitted dependent ASC job {asc_job_id} "
+                    f"(afterok:{cb_final_job_id})."
+                )
+            else:
+                print(
+                    "Submitted ASC follow-up with Slurm dependency, but could not parse "
+                    "the ASC job id from sbatch output."
+                )
+            print("CB->ASC submission complete; terminal no longer needs to stay open.")
+            return
+
+        wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_seconds, quiet=args.quiet)
 
     ms_path = find_ms_directory(cb_workdir)
     if ms_path is None:

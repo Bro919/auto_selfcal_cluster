@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
 import argparse
+from collections import deque
 import os
 import re
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -18,7 +20,11 @@ def parse_args():
     )
     parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
     parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
-    parser.add_argument("cb_input", nargs="?", help="URL or local path to the CB dataset when running CB build/prep")
+    parser.add_argument(
+        "observation_date_pos",
+        nargs="?",
+        help="Optional positional observation date for backward-compatible invocation forms",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output and command tracing")
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output to essential status/error messages")
     parser.add_argument(
@@ -28,7 +34,7 @@ def parse_args():
         help="Pipeline mode: cb, asc, cb-asc, or auto-image (default: cb-asc)",
     )
     parser.add_argument("--observation-date", help="Observation date, e.g. 2023-07-22")
-    parser.add_argument("--cb-url", dest="cb_url", help="URL or local path to the CB dataset when not skipping CB build/prep")
+    parser.add_argument("--url", help="Source URL/path; pipeline-specific behavior is inferred from --pipeline")
     parser.add_argument("--cb-workdir", help="Existing CB working directory to use instead of running build/prep")
     parser.add_argument(
         "--asc-ms-path",
@@ -50,27 +56,7 @@ def parse_args():
         help="Submit CB batch jobs after build/prep. By default the wrapper skips CB submission.",
     )
     parser.add_argument(
-        "--cb-submit-dry-run",
-        action="store_true",
-        help="When submitting CB jobs, print sbatch commands instead of executing them.",
-    )
-    parser.add_argument(
-        "--cb-submit-sleep-seconds",
-        type=int,
-        help="Seconds to wait between CB sbatch submissions.",
-    )
-    parser.add_argument(
-        "--cb-dry-run",
-        action="store_true",
-        help="Dry-run the CB workflow without executing build/prep/submission.",
-    )
-    parser.add_argument(
-        "--cb-no-wait",
-        action="store_true",
-        help="Do not wait for submitted CB SLURM jobs to complete before starting ASC in cb-asc mode.",
-    )
-    parser.add_argument(
-        "--cb-wait-poll-seconds",
+        "--cb-wait-seconds",
         type=int,
         default=60,
         help="Polling interval in seconds when waiting for CB SLURM completion (default: 60).",
@@ -90,17 +76,6 @@ def parse_args():
         default="casa-pipe",
         help="CASA executable to use for standalone auto-image direct runs.",
     )
-    parser.add_argument(
-        "--auto-image-dry-run",
-        action="store_true",
-        help="Dry-run standalone auto-image mode without executing commands.",
-    )
-    parser.add_argument(
-        "--auto-image-ensure-pandas",
-        action="store_true",
-        help="Deprecated: pandas install now always runs before direct auto-image execution.",
-    )
-
     parser.add_argument("--asc-source-name", help="Source name to write into ASC prep script")
     parser.add_argument(
         "--asc-split-band",
@@ -167,8 +142,147 @@ def parse_args():
     return parser.parse_args()
 
 
+def parse_named_inputs(inputs):
+    named_inputs = {}
+    positional_inputs = []
+    for token in inputs:
+        if "=" in token and not token.startswith("--"):
+            key, value = token.split("=", 1)
+            named_inputs[key.strip()] = value.strip()
+        else:
+            positional_inputs.append(token)
+    return named_inputs, positional_inputs
+
+
+def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
+    named_inputs, _ = parse_named_inputs(sys.argv[1:])
+
+    if args.observation_date_pos and not args.observation_date:
+        args.observation_date = args.observation_date_pos
+
+    if named_inputs.get("project_code"):
+        args.project_code = named_inputs["project_code"]
+    if named_inputs.get("object_name"):
+        args.object_name = named_inputs["object_name"]
+    if named_inputs.get("observation_date"):
+        args.observation_date = named_inputs["observation_date"]
+    if named_inputs.get("url"):
+        args.url = named_inputs["url"]
+
+    # Accept split form: "url= https://..."
+    if not args.url:
+        saw_url_marker = False
+        for token in sys.argv[1:]:
+            if token.lower() == "url=":
+                saw_url_marker = True
+                continue
+            if saw_url_marker:
+                args.url = token
+                break
+
+    return args
+
+
 def compute_cb_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
     return Path(f"working.{project_code}.{object_name}.{observation_date}")
+
+
+def parse_directory_links(html: str):
+    links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
+    unique_links = sorted(set(links))
+    valid_links = []
+    for link in unique_links:
+        if link in {"../", "./", "..", ".", ""}:
+            continue
+        if link.startswith("/"):
+            continue
+        if "?C=" in link:
+            continue
+        valid_links.append(link)
+    return valid_links
+
+
+def fetch_directory_links(url: str):
+    with urllib.request.urlopen(url) as response:
+        html = response.read().decode("utf-8", errors="ignore")
+    return parse_directory_links(html)
+
+
+def is_remote_url(value: str) -> bool:
+    text = (value or "").strip().lower()
+    return text.startswith("http://") or text.startswith("https://")
+
+
+def probe_remote_url_type(url: str, max_depth: int = 8, max_dirs: int = 600) -> str:
+    queue = deque([(url.rstrip("/"), 0)])
+    visited = set()
+    saw_cb_hint = False
+    saw_asc_hint = False
+
+    while queue and len(visited) < max_dirs:
+        current_url, depth = queue.popleft()
+        if current_url in visited:
+            continue
+        visited.add(current_url)
+
+        tail = current_url.rstrip("/").split("/")[-1].lower()
+        if tail.startswith("observation"):
+            saw_cb_hint = True
+        if tail.endswith(".ms"):
+            saw_asc_hint = True
+
+        try:
+            links = fetch_directory_links(current_url)
+        except Exception:
+            continue
+
+        for link in links:
+            link_clean = link.rstrip("/")
+            lower = link_clean.lower()
+            is_dir = link.endswith("/")
+
+            if is_dir and lower.startswith("observation"):
+                saw_cb_hint = True
+            if is_dir and lower.endswith(".ms"):
+                saw_asc_hint = True
+
+            if depth < max_depth and is_dir:
+                next_url = current_url.rstrip("/") + "/" + link.lstrip("/")
+                queue.append((next_url.rstrip("/"), depth + 1))
+
+        if saw_cb_hint and saw_asc_hint:
+            return "mixed"
+
+    if saw_cb_hint:
+        return "cb"
+    if saw_asc_hint:
+        return "asc"
+    return "unknown"
+
+
+def resolve_source_url(args: argparse.Namespace) -> Optional[str]:
+    return args.url
+
+
+def validate_url_for_pipeline(url: Optional[str], pipeline: str, quiet: bool = False) -> None:
+    if not url or not is_remote_url(url):
+        return
+
+    url_type = probe_remote_url_type(url)
+    if not quiet:
+        print(f"URL probe result: {url_type}")
+
+    if pipeline in {"cb", "cb-asc"} and url_type == "asc":
+        sys.exit(
+            "Error: The provided URL looks like an ASC-style source (contains .ms directories), "
+            "but CB/CB-ASC mode expects a CB archive/tree source (observation directories)."
+        )
+
+    if pipeline == "asc" and url_type == "cb":
+        sys.exit(
+            "Error: The provided URL looks like a CB-style source (observation directories), "
+            "but ASC mode expects an ASC-style source with .ms content."
+        )
 
 
 def is_ms_dir(path: Path) -> bool:
@@ -380,7 +494,7 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
             )
 
         cmd = ["sbatch", str(submit_script)]
-        if args.auto_image_dry_run or args.dry_run:
+        if args.dry_run:
             print("Auto-image dry run enabled; the following command would be executed:")
             print(" ".join(cmd))
             return
@@ -412,7 +526,7 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
     )
     commands.append([casa_executable, "--nogui", "-c", run_code])
 
-    if args.auto_image_dry_run or args.dry_run:
+    if args.dry_run:
         print("Auto-image dry run enabled; the following command(s) would be executed:")
         for command in commands:
             print(" ".join(str(arg) for arg in command))
@@ -454,9 +568,9 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
         print(f"Skipping CB build/prep and using existing workdir: {cb_workdir}")
         return cb_workdir, None
 
-    cb_url = args.cb_input or args.cb_url
+    cb_url = resolve_source_url(args)
     if not cb_url:
-        sys.exit("Error: cb_input or --cb-url must be provided unless --skip-cb is used.")
+        sys.exit("Error: a source URL/path is required for CB mode (use --url).")
 
     cb_workdir = None
     if args.project_code and args.object_name and args.observation_date:
@@ -480,11 +594,7 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
         cmd.extend(["--temp-dir", args.cb_temp_dir])
     if not args.cb_submit:
         cmd.append("--skip-submit")
-    if args.cb_submit_dry_run:
-        cmd.append("--submit-dry-run")
-    if args.cb_submit_sleep_seconds is not None:
-        cmd.extend(["--submit-sleep-seconds", str(args.cb_submit_sleep_seconds)])
-    if args.cb_dry_run or args.dry_run:
+    if args.dry_run:
         cmd.append("--dry-run")
 
     if args.dry_run:
@@ -561,19 +671,72 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
     run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
 
 
+def run_asc_remote_workflow(args: argparse.Namespace, source_url: str) -> None:
+    script_dir = Path(__file__).resolve().parent
+    asc_script = script_dir / "run_build_and_prep_ASC.py"
+    if not asc_script.exists():
+        raise FileNotFoundError(f"Could not find ASC wrapper script: {asc_script}")
+
+    cmd = [sys.executable, str(asc_script)]
+    if args.project_code:
+        cmd.append(f"project_code={args.project_code}")
+    if args.object_name:
+        cmd.append(f"object_name={args.object_name}")
+    if args.observation_date:
+        cmd.append(f"observation_date={args.observation_date}")
+    cmd.extend(["--url", source_url])
+    cmd.extend(["--asc", args.asc_template])
+    if args.verbose:
+        cmd.append("--verbose")
+    if args.quiet:
+        cmd.append("--quiet")
+    if args.asc_source_name:
+        cmd.extend(["--source_name", args.asc_source_name])
+    if args.asc_split_band:
+        cmd.extend(["--split_band", args.asc_split_band])
+    if args.asc_use_single_band:
+        cmd.append("--use_single_band")
+        cmd.extend(["--single_band", args.asc_single_band])
+    if args.asc_use_single_freq:
+        cmd.append("--use_single_freq")
+        cmd.extend(["--single_freq", str(args.asc_single_freq)])
+    if args.asc_a_config:
+        cmd.append("--a_config")
+    if args.asc_auto_sc_dir:
+        cmd.extend(["--auto_sc_dir", args.asc_auto_sc_dir])
+    if args.asc_no_casa:
+        cmd.append("--no-run-casa")
+    if args.asc_skip_submit:
+        cmd.append("--skip-submit")
+    if args.asc_dry_run or args.dry_run:
+        cmd.append("--dry-run")
+    if args.asc_casa_executable != "casa":
+        cmd.extend(["--casa-executable", args.asc_casa_executable])
+
+    if args.dry_run:
+        print("ASC remote dry run enabled; the following command would be executed:")
+        print(" ".join(str(arg) for arg in cmd))
+        return
+
+    run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
+
+
 def main() -> None:
-    args = parse_args()
+    args = normalize_cli_inputs(parse_args())
     pipeline = args.pipeline
+    source_url = resolve_source_url(args)
 
     if args.quiet and args.verbose:
         sys.exit("Error: --quiet and --verbose cannot be used together.")
 
     if args.dry_run:
-        args.cb_dry_run = True
         args.asc_dry_run = True
 
     if args.skip_cb and not args.cb_workdir:
         sys.exit("Error: --skip-cb requires --cb-workdir.")
+
+    if source_url and is_remote_url(source_url):
+        validate_url_for_pipeline(source_url, pipeline, quiet=args.quiet)
 
     if pipeline == "cb":
         cb_workdir, cb_final_job_id = run_cb_workflow(args)
@@ -582,16 +745,14 @@ def main() -> None:
             print("CB dry-run complete.")
             return
 
-        if args.cb_submit and not args.cb_submit_dry_run:
+        if args.cb_submit:
             print("CB submission includes auto-image chaining via Slurm dependency.")
-            if not args.cb_no_wait:
-                if cb_final_job_id:
-                    wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds, quiet=args.quiet)
-                else:
-                    sys.exit(
-                        "Error: CB submission was requested but no SLURM job ID was detected from CB output. "
-                        "Use --cb-no-wait to bypass wait logic, or inspect CB submit output."
-                    )
+            if cb_final_job_id:
+                wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_seconds, quiet=args.quiet)
+            else:
+                sys.exit(
+                    "Error: CB submission was requested but no SLURM job ID was detected from CB output."
+                )
             print("CB pipeline and chained auto-image completed successfully.")
             return
 
@@ -610,8 +771,12 @@ def main() -> None:
         asc_source = Path(args.asc_ms_path).expanduser() if args.asc_ms_path else None
         if asc_source is None and args.cb_workdir:
             asc_source = Path(args.cb_workdir).expanduser()
+        if asc_source is None and source_url:
+            run_asc_remote_workflow(args, source_url)
+            print("ASC pipeline completed successfully.")
+            return
         if asc_source is None:
-            sys.exit("Error: ASC mode requires --asc-ms-path or --cb-workdir.")
+            sys.exit("Error: ASC mode requires --asc-ms-path, --cb-workdir, or --url.")
 
         ms_path = find_ms_directory(asc_source)
         if ms_path is None:
@@ -626,11 +791,6 @@ def main() -> None:
         if not args.cb_submit and not args.skip_cb:
             print("CB-ASC mode requires CB submission; enabling --cb-submit automatically.")
             args.cb_submit = True
-        if args.cb_submit_dry_run and not args.dry_run:
-            sys.exit(
-                "Error: --cb-submit-dry-run cannot be used with cb-asc execution because ASC requires real CB outputs. "
-                "Use --dry-run for full wrapper preview, or remove --cb-submit-dry-run."
-            )
 
     cb_workdir, cb_final_job_id = run_cb_workflow(args)
 
@@ -638,22 +798,17 @@ def main() -> None:
         print("Dry-run complete. No ASC workflow was executed because the wrapper is in dry-run mode.")
         return
 
-    if args.cb_submit and not args.cb_no_wait:
+    if args.cb_submit:
         if cb_final_job_id:
-            wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_poll_seconds, quiet=args.quiet)
+            wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_seconds, quiet=args.quiet)
         else:
             sys.exit(
                 "Error: CB submission was requested but no SLURM job ID was detected from CB output. "
-                "Use --cb-no-wait to bypass wait logic, or inspect CB submit output."
+                "Inspect CB submit output and Slurm status."
             )
 
     ms_path = find_ms_directory(cb_workdir)
     if ms_path is None:
-        if args.cb_submit and args.cb_no_wait:
-            sys.exit(
-                f"Error: CB output .ms is not available yet in {cb_workdir}. "
-                "You used --cb-no-wait, so ASC started before CB finished. Remove --cb-no-wait to enforce dependency waiting."
-            )
         sys.exit(f"Error: Could not locate a .ms measurement set inside the CB workdir {cb_workdir}.")
 
     print(f"Found CB measurement set for ASC input: {ms_path}")

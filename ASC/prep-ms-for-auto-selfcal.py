@@ -709,6 +709,30 @@ xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicas
     print(f"Job script {job_script} created.")
     batch_file_paths.append(job_script_path)
 
+# Add one final cleanup job that runs after all frequency jobs complete.
+cleanup_job_script = "clean_up_post_selfcal_job.sh"
+cleanup_job_base = f"auto_selfcal_cleanup_{ms_prefix}"
+cleanup_job_content = f"""#!/bin/bash
+
+#SBATCH --export=ALL                          # Export all environment variables to job
+#SBATCH --job-name={cleanup_job_base}
+#SBATCH --output={cleanup_job_base}.out
+#SBATCH --error={cleanup_job_base}.err
+#SBATCH --chdir={os.getcwd()}
+#SBATCH --time=1-0:0:0                        # Request 1 day
+#SBATCH --mem=64G                             # Memory for cleanup
+#SBATCH --nodes=1                             # Request 1 node
+#SBATCH --ntasks-per-node=2                   # Request 2 cores
+
+echo "about to run clean_up_post_selfcal.py"
+xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c clean_up_post_selfcal.py
+"""
+
+with open(cleanup_job_script, "w") as f:
+    f.write(cleanup_job_content)
+print(f"Job script {cleanup_job_script} created.")
+batch_file_paths.append(cleanup_job_script)
+
 with open('batch_files_list.txt', 'w') as f:
     for path in batch_file_paths:
         f.write(path + '\n')

@@ -119,15 +119,15 @@ def parse_named_inputs(inputs) -> Tuple[Dict[str, str], list]:
 
 def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
     named_inputs, _ = parse_named_inputs(sys.argv[1:])
-    if named_inputs.get("project_code") and not args.project_code:
+    if named_inputs.get("project_code"):
         args.project_code = named_inputs["project_code"]
-    if named_inputs.get("object_name") and not args.object_name:
+    if named_inputs.get("object_name"):
         args.object_name = named_inputs["object_name"]
-    if named_inputs.get("observation_date") and not args.observation_date:
+    if named_inputs.get("observation_date"):
         args.observation_date = named_inputs["observation_date"]
-    if named_inputs.get("url") and not args.url:
+    if named_inputs.get("url"):
         args.url = named_inputs["url"]
-    if named_inputs.get("source") and not args.ms_path and not args.source:
+    if named_inputs.get("source") and not args.ms_path:
         args.source = named_inputs["source"]
 
     for attr in ("project_code", "object_name", "observation_date"):

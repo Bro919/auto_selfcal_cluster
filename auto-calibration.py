@@ -71,6 +71,32 @@ def parse_args():
             "and exits immediately."
         ),
     )
+    parser.add_argument(
+        "--cb-asc-sbatch-time",
+        default="2-00:00:00",
+        help="SLURM wall time for dependency-submitted ASC follow-up job (default: 2-00:00:00).",
+    )
+    parser.add_argument(
+        "--cb-asc-sbatch-mem",
+        default="64G",
+        help="SLURM memory request for dependency-submitted ASC follow-up job (default: 64G).",
+    )
+    parser.add_argument(
+        "--cb-asc-sbatch-cpus",
+        type=int,
+        default=1,
+        help="SLURM CPU count for dependency-submitted ASC follow-up job (default: 1).",
+    )
+    parser.add_argument(
+        "--cb-asc-sbatch-partition",
+        default=None,
+        help="Optional SLURM partition for dependency-submitted ASC follow-up job.",
+    )
+    parser.add_argument(
+        "--cb-asc-sbatch-account",
+        default=None,
+        help="Optional SLURM account for dependency-submitted ASC follow-up job.",
+    )
 
     parser.add_argument(
         "--auto-image-workdir",
@@ -701,16 +727,24 @@ def submit_dependent_asc_job(args: argparse.Namespace, cb_workdir: Path, cb_fina
 
     launcher_path = script_dir / "submit_asc_after_cb.sh"
     command_str = " ".join(shlex.quote(str(part)) for part in cmd)
-    launcher_path.write_text(
-        "#!/bin/bash\n"
-        "#SBATCH --job-name=cb_asc_followup\n"
-        "#SBATCH --output=cb_asc_followup.%j.out\n"
-        "#SBATCH --error=cb_asc_followup.%j.err\n"
-        f"#SBATCH --chdir={script_dir}\n\n"
-        "set -euo pipefail\n"
-        f"{command_str}\n",
-        encoding="utf-8",
-    )
+    header_lines = [
+        "#!/bin/bash",
+        "#SBATCH --job-name=cb_asc_followup",
+        "#SBATCH --output=cb_asc_followup.%j.out",
+        "#SBATCH --error=cb_asc_followup.%j.err",
+        f"#SBATCH --chdir={script_dir}",
+        f"#SBATCH --time={args.cb_asc_sbatch_time}",
+        f"#SBATCH --mem={args.cb_asc_sbatch_mem}",
+        "#SBATCH --nodes=1",
+        f"#SBATCH --ntasks-per-node={max(1, args.cb_asc_sbatch_cpus)}",
+    ]
+    if args.cb_asc_sbatch_partition:
+        header_lines.append(f"#SBATCH --partition={args.cb_asc_sbatch_partition}")
+    if args.cb_asc_sbatch_account:
+        header_lines.append(f"#SBATCH --account={args.cb_asc_sbatch_account}")
+
+    launcher_text = "\n".join(header_lines + ["", "set -euo pipefail", command_str, ""])
+    launcher_path.write_text(launcher_text, encoding="utf-8")
 
     submit_cmd = [
         "sbatch",
@@ -887,7 +921,7 @@ def main() -> None:
                     "Submitted ASC follow-up with Slurm dependency, but could not parse "
                     "the ASC job id from sbatch output."
                 )
-            print("CB->ASC submission complete; terminal no longer needs to stay open.")
+            print("CB->ASC submission complete")
             return
 
         wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_seconds, quiet=args.quiet)

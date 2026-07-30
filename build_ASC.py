@@ -89,6 +89,10 @@ def print_download_progress(blocks: int, block_size: int, total_size: int) -> No
     )
 
 
+def use_inline_progress(quiet: bool) -> bool:
+    return (not quiet) and sys.stdout.isatty()
+
+
 def extract_tar_with_progress(tar_path: Path, extract_path: Path) -> None:
     with tarfile.open(str(tar_path), "r:*") as tar:
         members = tar.getmembers()
@@ -208,12 +212,9 @@ def download_files(
     print(f"Found {total_files} files to download")
     failed_files: List[Tuple[Path, str]] = []
     completed = 0
+    inline_progress = use_inline_progress(quiet)
 
     for idx, (rel_path, file_url) in enumerate(all_files, 1):
-        # Keep the next file header readable after a carriage-return status line.
-        if idx > 1 and not quiet:
-            print()
-
         if ms_found and ms_rel_path:
             relative_path = Path(ms_rel_path) / Path(rel_path)
         else:
@@ -223,10 +224,14 @@ def download_files(
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
         if not quiet:
-            print(f"Downloading: {relative_path}")
+            if inline_progress:
+                print(f"Downloading: {relative_path}")
+            else:
+                print(f"Downloading ({idx}/{total_files}): {relative_path}")
         try:
-            urllib.request.urlretrieve(file_url, str(file_path), reporthook=print_download_progress)
-            if not quiet:
+            hook = print_download_progress if inline_progress else None
+            urllib.request.urlretrieve(file_url, str(file_path), reporthook=hook)
+            if inline_progress:
                 print()
         except Exception as exc:
             print(f"Warning: Could not download {relative_path}: {exc}")
@@ -241,12 +246,19 @@ def download_files(
             if idx == total_files or idx % 10 == 0:
                 print(f"Directory progress: {percent:5.1f}% ({idx}/{total_files} files)")
         else:
-            print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total_files} files)", end="", flush=True)
+            if inline_progress:
+                print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total_files} files)", end="", flush=True)
+            else:
+                if idx == total_files or idx % 10 == 0:
+                    print(f"Directory progress: {percent:5.1f}% ({idx}/{total_files} files)")
 
     if quiet:
         print(f"Directory download complete ({completed}/{total_files} files).")
     else:
-        print("\nDirectory download complete.")
+        if inline_progress:
+            print("\nDirectory download complete.")
+        else:
+            print("Directory download complete.")
 
     if failed_files:
         sample = ", ".join(str(path) for path, _ in failed_files[:5])
@@ -313,7 +325,7 @@ def cleanup_paths(paths: Sequence[Path], logger: logging.Logger) -> None:
             logger.warning("Could not remove %s: %s", path, exc)
 
 
-def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger) -> Optional[Path]:
+def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger, quiet: bool = False) -> Optional[Path]:
     cwd_tar_files = sorted(Path.cwd().glob("*.tar*"))
     if cwd_tar_files:
         source_tar = cwd_tar_files[0]
@@ -338,8 +350,12 @@ def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger) -> O
             print(f"Found tar file: {tar_file}")
             print(f"Downloading {full_url}")
             tar_path = workdir_path / Path(tar_file).name
-            urllib.request.urlretrieve(full_url, str(tar_path), reporthook=print_download_progress)
-            print("\nDownload complete.")
+            hook = print_download_progress if use_inline_progress(quiet) else None
+            urllib.request.urlretrieve(full_url, str(tar_path), reporthook=hook)
+            if hook is not None:
+                print("\nDownload complete.")
+            else:
+                print("Download complete.")
             return tar_path
         except Exception as exc:
             logger.error("Could not fetch directory listing from %s: %s", url, exc)
@@ -349,11 +365,15 @@ def choose_tar_source(url: str, workdir_path: Path, logger: logging.Logger) -> O
     tar_path = workdir_path / tar_name
     print(f"Downloading {url}")
     try:
-        urllib.request.urlretrieve(url, str(tar_path), reporthook=print_download_progress)
+        hook = print_download_progress if use_inline_progress(quiet) else None
+        urllib.request.urlretrieve(url, str(tar_path), reporthook=hook)
     except Exception as exc:
         logger.error("Could not download tar file from %s: %s", url, exc)
         return None
-    print("\nDownload complete.")
+    if hook is not None:
+        print("\nDownload complete.")
+    else:
+        print("Download complete.")
     return tar_path
 
 
@@ -628,7 +648,7 @@ def main() -> None:
         cleanup_paths([temp_dir], logger)
     else:
         logger.info("No files found via directory download; attempting tar fallback.")
-        tar_path = choose_tar_source(args.url, workdir_path, logger)
+        tar_path = choose_tar_source(args.url, workdir_path, logger, quiet=args.quiet)
         if not tar_path or not tar_path.exists():
             sys.exit(
                 "Error: No measurement set directory was found in the downloaded content. "

@@ -35,6 +35,10 @@ def download_progress(blocks: int, block_size: int, total_size: int) -> None:
     )
 
 
+def use_inline_progress(quiet: bool) -> bool:
+    return (not quiet) and sys.stdout.isatty()
+
+
 def extract_tar_with_progress(tar_path: Path, extract_path: Path) -> None:
     with tarfile.open(str(tar_path), "r:*") as tar:
         members = tar.getmembers()
@@ -231,16 +235,19 @@ def download_directory(
     total = len(file_list)
     print(f"Found {total} files to download")
     completed = 0
+    inline_progress = use_inline_progress(quiet)
     for idx, (relative_path, file_url) in enumerate(file_list, start=1):
         destination = target_dir / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
 
-        if idx > 1 and not quiet:
-            print()
         if not quiet:
-            print(f"Downloading: {relative_path}")
-        urllib.request.urlretrieve(file_url, str(destination), reporthook=download_progress)
-        if not quiet:
+            if inline_progress:
+                print(f"Downloading: {relative_path}")
+            else:
+                print(f"Downloading ({idx}/{total}): {relative_path}")
+        hook = download_progress if inline_progress else None
+        urllib.request.urlretrieve(file_url, str(destination), reporthook=hook)
+        if inline_progress:
             print()
 
         completed += 1
@@ -249,12 +256,19 @@ def download_directory(
             if idx == total or idx % 10 == 0:
                 print(f"Directory progress: {percent:5.1f}% ({idx}/{total} files)")
         else:
-            print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total} files)", end="", flush=True)
+            if inline_progress:
+                print(f"\rDirectory progress: {percent:5.1f}% ({idx}/{total} files)", end="", flush=True)
+            else:
+                if idx == total or idx % 10 == 0:
+                    print(f"Directory progress: {percent:5.1f}% ({idx}/{total} files)")
 
     if quiet:
         print(f"Directory download complete ({completed}/{total} files).")
     else:
-        print("\nDirectory download complete.")
+        if inline_progress:
+            print("\nDirectory download complete.")
+        else:
+            print("Directory download complete.")
 
 
 def update_casa_import_block(script_path: Path, observation_dir_name: str) -> None:
@@ -478,8 +492,12 @@ def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: loggin
         tar_name = Path(url).name or "remote.tar"
         tar_path = temp_dir / tar_name
         print(f"Downloading tar file from {url}")
-        urllib.request.urlretrieve(url, str(tar_path), reporthook=download_progress)
-        print("\nDownload complete.")
+        hook = download_progress if use_inline_progress(quiet) else None
+        urllib.request.urlretrieve(url, str(tar_path), reporthook=hook)
+        if hook is not None:
+            print("\nDownload complete.")
+        else:
+            print("Download complete.")
 
         if not tarfile.is_tarfile(str(tar_path)):
             raise RuntimeError(f"Downloaded file is not a valid tar archive: {tar_path}")

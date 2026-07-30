@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import codecs
 from collections import deque
 import os
 import re
@@ -367,20 +368,63 @@ def run_subprocess(command, cwd: Path, quiet: bool = False, verbose: bool = Fals
         cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        universal_newlines=True,
-        bufsize=1,
+        bufsize=0,
         env=env,
     )
 
     output_chunks = []
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    non_tty_buffer = ""
+
+    def collapse_carriage_progress(text: str) -> str:
+        if not text:
+            return text
+        lines = text.split("\n")
+        normalized_lines = [line.split("\r")[-1] for line in lines]
+        return "\n".join(normalized_lines)
+
+    def flush_non_tty_text(text: str, final: bool = False) -> None:
+        nonlocal non_tty_buffer
+        if not text and not final:
+            return
+
+        non_tty_buffer += text
+        segments = non_tty_buffer.split("\n")
+        if final:
+            complete_segments = segments
+            non_tty_buffer = ""
+        else:
+            complete_segments = segments[:-1]
+            non_tty_buffer = segments[-1]
+
+        for segment in complete_segments:
+            visible = segment.split("\r")[-1]
+            if visible:
+                print(visible)
+
     assert process.stdout is not None
-    for line in process.stdout:
-        output_chunks.append(line)
+    while True:
+        chunk = process.stdout.read(4096)
+        if not chunk:
+            break
+        output_chunks.append(chunk)
         if not quiet:
-            print(line, end="", flush=True)
+            decoded = decoder.decode(chunk)
+            if sys.stdout.isatty():
+                print(decoded, end="", flush=True)
+            else:
+                flush_non_tty_text(decoded)
+
+    if not quiet:
+        tail = decoder.decode(b"", final=True)
+        if sys.stdout.isatty():
+            if tail:
+                print(tail, end="", flush=True)
+        else:
+            flush_non_tty_text(tail, final=True)
 
     return_code = process.wait()
-    combined_output = "".join(output_chunks)
+    combined_output = b"".join(output_chunks).decode("utf-8", errors="replace")
     result = subprocess.CompletedProcess(
         args=command,
         returncode=return_code,
@@ -389,7 +433,8 @@ def run_subprocess(command, cwd: Path, quiet: bool = False, verbose: bool = Fals
     )
     if return_code != 0:
         if quiet and combined_output:
-            print(combined_output, file=sys.stderr, end="" if combined_output.endswith("\n") else "\n")
+            clean_output = collapse_carriage_progress(combined_output)
+            print(clean_output, file=sys.stderr, end="" if clean_output.endswith("\n") else "\n")
         raise subprocess.CalledProcessError(return_code, command, output=combined_output, stderr="")
     return result
 

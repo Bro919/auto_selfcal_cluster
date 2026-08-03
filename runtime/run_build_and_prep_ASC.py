@@ -10,6 +10,14 @@ from typing import Dict, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 
+def runtime_dir() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def project_root_dir() -> Path:
+    return runtime_dir().parent
+
+
 def configure_logging(verbose: bool) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
@@ -102,7 +110,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def compute_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
-    return Path(f"{project_code}.{object_name}.{observation_date}")
+    return project_root_dir() / f"{project_code}.{object_name}.{observation_date}"
 
 
 def parse_named_inputs(inputs) -> Tuple[Dict[str, str], list]:
@@ -378,7 +386,7 @@ def scrape_local_metadata(
     project_code: Optional[str] = None,
     logger: Optional[logging.Logger] = None,
 ) -> dict:
-    script_dir = Path(__file__).resolve().parent
+    script_dir = runtime_dir()
     metadata_script = resolve_metadata_scraper(script_dir)
     command = [
         sys.executable,
@@ -468,7 +476,7 @@ def prepare_workdir_from_local_input(
     if ms_source.resolve() != dest_ms_path.resolve():
         shutil.copytree(str(ms_source), str(dest_ms_path))
 
-    template_src = Path(asc_template) if Path(asc_template).is_absolute() else (Path.cwd() / asc_template)
+    template_src = Path(asc_template) if Path(asc_template).is_absolute() else (project_root_dir() / asc_template)
     if not template_src.exists():
         raise FileNotFoundError(f"ASC template directory does not exist: {template_src}")
 
@@ -924,7 +932,7 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
     build_date = args.observation_date or "unknown"
     log_metadata_summary(logger, build_project_code, build_object, build_date)
 
-    script_dir = Path(__file__).resolve().parent
+    script_dir = runtime_dir()
     workdir = compute_workdir(build_project_code, build_object, build_date)
 
     build_cmd = [
@@ -955,7 +963,7 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
         return
 
     logger.info("Running build_ASC.py")
-    run_checked(build_cmd, cwd=script_dir, logger=logger, description="Launching build helper")
+    run_checked(build_cmd, cwd=project_root_dir(), logger=logger, description="Launching build helper")
 
     logger.info("Locating measurement set in workdir")
     ms_path = find_ms_directory(workdir)
@@ -1014,7 +1022,7 @@ def main() -> None:
         args.auto_sc_dir = str(auto_sc_path)
         logger.info("Using provided auto_selfcal path: %s", args.auto_sc_dir)
     else:
-        default_auto_sc = Path(__file__).resolve().parent / "repo" / "auto_selfcal" / "auto_selfcal"
+        default_auto_sc = project_root_dir() / "repo" / "auto_selfcal" / "auto_selfcal"
         if default_auto_sc.exists():
             args.auto_sc_dir = str(default_auto_sc.resolve())
             logger.info("Using default auto_selfcal path: %s", args.auto_sc_dir)

@@ -17,6 +17,14 @@ from urllib.parse import urlparse
 from build_CB import find_first_observation_dir, get_all_files_from_directory
 
 
+def runtime_dir() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def project_root_dir() -> Path:
+    return runtime_dir().parent
+
+
 def configure_logging(verbose: bool) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
@@ -94,7 +102,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def compute_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
-    return Path(f"working.{project_code}.{object_name}.{observation_date}")
+    return project_root_dir() / f"working.{project_code}.{object_name}.{observation_date}"
 
 
 def parse_named_inputs(inputs: List[str]) -> Tuple[Dict[str, str], List[str]]:
@@ -327,7 +335,7 @@ def infer_metadata_from_remote_url(url: str, logger: logging.Logger) -> dict:
                 remote_metadata_dir = temp_dir / "remote_metadata"
                 remote_metadata_dir.mkdir(parents=True, exist_ok=True)
                 download_remote_files(observation_dir_url, remote_metadata_dir, extensions={".xml"})
-                metadata = run_metadata_scraper(Path(__file__).resolve().parent, remote_metadata_dir, project_code)
+                metadata = run_metadata_scraper(runtime_dir(), remote_metadata_dir, project_code)
 
                 if not project_code and metadata.get("project_code") not in (None, "", "unknown"):
                     project_code = metadata.get("project_code")
@@ -430,7 +438,7 @@ def run_build(
     if args.quiet:
         command.append("--quiet")
 
-    run_checked(command, script_dir, logger, "Running build step", args.dry_run)
+    run_checked(command, project_root_dir(), logger, "Running build step", args.dry_run)
 
 
 def run_prep(workdir: Path, args: argparse.Namespace, logger: logging.Logger) -> None:
@@ -463,7 +471,7 @@ def main() -> None:
     logger = configure_logging(args.verbose)
     logger.info("Starting CB build+prep runner")
 
-    script_dir = Path(__file__).resolve().parent
+    script_dir = runtime_dir()
     project_code, object_name, url, observation_date = collect_resolved_inputs(args)
 
     if not project_code or not object_name or not observation_date:

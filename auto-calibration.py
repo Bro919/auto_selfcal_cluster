@@ -142,7 +142,7 @@ def parse_args():
         help="Single frequency to use when asc-use-single-freq is set.",
     )
     parser.add_argument(
-        "--asc-a-config",
+        "--a-config",
         action="store_true",
         help="Enable A_config in the ASC prep script.",
     )
@@ -625,7 +625,7 @@ def list_cb_workdirs(script_dir: Path):
 
 def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
     script_dir = Path(__file__).resolve().parent
-    cb_script = script_dir / "run_build_and_prep_CB.py"
+    cb_script = script_dir / "runtime" / "run_build_and_prep_CB.py"
     if not cb_script.exists():
         raise FileNotFoundError(f"Could not find CB wrapper script: {cb_script}")
 
@@ -704,7 +704,7 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
 
 def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
     script_dir = Path(__file__).resolve().parent
-    asc_script = script_dir / "run_build_and_prep_ASC.py"
+    asc_script = script_dir / "runtime" / "run_build_and_prep_ASC.py"
     if not asc_script.exists():
         raise FileNotFoundError(f"Could not find ASC wrapper script: {asc_script}")
 
@@ -719,7 +719,7 @@ def run_asc_workflow(args: argparse.Namespace, ms_path: Path) -> None:
 
 
 def build_asc_local_command(args: argparse.Namespace, ms_path: Path, script_dir: Path) -> list:
-    asc_script = script_dir / "run_build_and_prep_ASC.py"
+    asc_script = script_dir / "runtime" / "run_build_and_prep_ASC.py"
     asc_template = Path(args.asc_template).expanduser()
     if not asc_template.is_absolute():
         asc_template = (script_dir / asc_template).resolve()
@@ -816,7 +816,7 @@ def submit_dependent_asc_job(args: argparse.Namespace, cb_workdir: Path, cb_fina
 
 def run_asc_remote_workflow(args: argparse.Namespace, source_url: str) -> None:
     script_dir = Path(__file__).resolve().parent
-    asc_script = script_dir / "run_build_and_prep_ASC.py"
+    asc_script = script_dir / "runtime" / "run_build_and_prep_ASC.py"
     if not asc_script.exists():
         raise FileNotFoundError(f"Could not find ASC wrapper script: {asc_script}")
 

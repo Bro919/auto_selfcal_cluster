@@ -699,7 +699,7 @@ for i in range(len(split_ms_directories)):
 #SBATCH --ntasks-per-node={cores}             # Request {cores} cores
 
 echo "about to run auto_selfcal.py"
-xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c auto_selfcal.py
+xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa -quiet /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c auto_selfcal.py
 """
 
     # Write the job script to a file
@@ -725,7 +725,7 @@ cleanup_job_content = f"""#!/bin/bash
 #SBATCH --ntasks-per-node=2                   # Request 2 cores
 
 echo "about to run clean_up_post_selfcal.py"
-xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c clean_up_post_selfcal.py
+xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa -quiet /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c clean_up_post_selfcal.py
 """
 
 with open(cleanup_job_script, "w") as f:

@@ -109,6 +109,25 @@ def safe_remove(path: Path) -> None:
         print(f"Warning: Could not remove temporary file {path}: {exc}")
 
 
+def resolve_existing_path(path_value: str, script_dir: Path) -> Path:
+    """Resolve a path using common roots and return the first existing candidate."""
+    raw = Path(path_value).expanduser()
+    if raw.is_absolute():
+        return raw
+
+    candidates = [
+        Path.cwd() / raw,
+        script_dir / raw,
+        script_dir.parent / raw,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    # Keep behavior deterministic for error reporting.
+    return candidates[-1]
+
+
 def parse_directory_links(html: str) -> List[str]:
     links = re.findall(r'href=["\']([^"\'?]+)["\']', html)
     unique_links = sorted(set(links))
@@ -575,10 +594,8 @@ def main() -> None:
     print(f"Created working directory: {workdir_path}")
 
     script_dir = Path(__file__).resolve().parent
-    cb_template = Path(args.cb)
-    cb_template_src = cb_template if cb_template.is_absolute() else (script_dir / cb_template)
-    auto_image_vla = Path(args.auto_image_vla)
-    auto_image_vla_src = auto_image_vla if auto_image_vla.is_absolute() else (script_dir / auto_image_vla)
+    cb_template_src = resolve_existing_path(args.cb, script_dir)
+    auto_image_vla_src = resolve_existing_path(args.auto_image_vla, script_dir)
 
     temp_root = Path(args.temp_dir).expanduser().resolve() if args.temp_dir else Path.cwd()
     temp_root.mkdir(parents=True, exist_ok=True)

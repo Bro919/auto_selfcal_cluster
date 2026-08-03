@@ -331,11 +331,11 @@ def validate_url_for_pipeline(url: Optional[str], pipeline: str, quiet: bool = F
         )
 
     if pipeline == "asc" and url_type == "mixed":
-        sys.exit(
-            "Error: The provided URL appears mixed (contains both CB observation and ASC .ms content). "
-            "ASC mode requires an ASC-only source. Point to the specific .ms-containing directory or "
-            "switch to --pipeline cb when using observation-style CB inputs."
-        )
+        if not quiet:
+            print(
+                "Warning: URL probe detected mixed content (both observation-style and .ms-style). "
+                "Continuing in ASC mode and preferring .ms content."
+            )
 
 
 def is_ms_dir(path: Path) -> bool:

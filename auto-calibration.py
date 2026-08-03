@@ -3,9 +3,11 @@
 import argparse
 import codecs
 from collections import deque
+from datetime import datetime
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -221,7 +223,7 @@ def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def compute_cb_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
-    return Path(f"working.{project_code}.{object_name}.{observation_date}")
+    return Path(f"CB.{project_code}.{object_name}.{observation_date}")
 
 
 def parse_directory_links(html: str):
@@ -347,7 +349,7 @@ def find_ms_directory(root_dir: Path) -> Optional[Path]:
 def infer_metadata_from_workdir(cb_workdir: Path):
     cb_workdir = Path(cb_workdir)
     name = cb_workdir.name
-    if name.startswith("working."):
+    if name.startswith("CB.") or name.startswith("working."):
         parts = name.split(".", 3)
         if len(parts) == 4:
             _, project_code, object_name, observation_date = parts
@@ -548,6 +550,112 @@ def wait_for_slurm_job_completion(job_id: str, poll_seconds: int, quiet: bool = 
         time.sleep(interval)
 
 
+def archive_old_slurm_artifacts(script_dir: Path, quiet: bool = False) -> int:
+    script_dir = Path(script_dir)
+    candidates = []
+    patterns = [
+        "submit_asc_after_cb.sh",
+        "cb_asc_followup.*.out",
+        "cb_asc_followup.*.err",
+        "slurm-*.out",
+        "slurm-*.err",
+    ]
+    for pattern in patterns:
+        candidates.extend([p for p in script_dir.glob(pattern) if p.is_file()])
+
+    # Preserve first-seen order while removing duplicates.
+    unique_candidates = list(dict.fromkeys(candidates))
+    if not unique_candidates:
+        return 0
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archive_dir = script_dir / "logs" / "slurm" / f"archive_{timestamp}"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    moved_count = 0
+    for path in unique_candidates:
+        destination = archive_dir / path.name
+        if destination.exists():
+            destination = archive_dir / f"{path.stem}_{int(time.time())}{path.suffix}"
+        shutil.move(str(path), str(destination))
+        moved_count += 1
+
+    if not quiet:
+        print(f"Archived {moved_count} old slurm artifact(s) to {archive_dir}")
+    return moved_count
+
+
+def build_cleanup_jobname(args: argparse.Namespace) -> str:
+    parts = [
+        "cb-asc",
+        args.project_code or "unknown_project",
+        args.object_name or "unknown_object",
+        args.observation_date or "unknown_date",
+    ]
+    return ".".join(parts)
+
+
+def submit_post_job_cleanup(args: argparse.Namespace, after_job_id: str, jobname: str) -> str:
+    script_dir = Path(__file__).resolve().parent
+    cleanup_script = script_dir / "runtime" / "cleanup_runtime_logs.py"
+    if not cleanup_script.exists():
+        raise FileNotFoundError(f"Could not find cleanup script: {cleanup_script}")
+
+    slurm_logs_dir = script_dir / "logs" / "slurm"
+    slurm_logs_dir.mkdir(parents=True, exist_ok=True)
+
+    wrap_cmd = " ".join(
+        [
+            shlex.quote(sys.executable),
+            shlex.quote(str(cleanup_script)),
+            "--jobname",
+            shlex.quote(jobname),
+            "--root-dir",
+            shlex.quote(str(script_dir)),
+        ]
+    )
+
+    submit_cmd = [
+        "sbatch",
+        "--dependency",
+        f"afterany:{after_job_id}",
+        "--job-name",
+        f"log_cleanup_{jobname[:32]}",
+        "--chdir",
+        str(script_dir),
+        "--time",
+        "00:10:00",
+        "--mem",
+        "1G",
+        "--nodes",
+        "1",
+        "--ntasks-per-node",
+        "1",
+        "--output",
+        str(slurm_logs_dir / "log_cleanup.%j.out"),
+        "--error",
+        str(slurm_logs_dir / "log_cleanup.%j.err"),
+        "--wrap",
+        wrap_cmd,
+    ]
+
+    result = subprocess.run(
+        submit_cmd,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+    )
+
+    stdout_text = (result.stdout or "").strip()
+    stderr_text = (result.stderr or "").strip()
+    if stderr_text:
+        print(stderr_text, file=sys.stderr)
+
+    submitted_ids = extract_submitted_job_ids(stdout_text)
+    return submitted_ids[-1] if submitted_ids else ""
+
+
 def run_auto_image_workflow(args: argparse.Namespace) -> None:
     script_dir = Path(__file__).resolve().parent
     workdir_input = args.auto_image_workdir or args.cb_workdir
@@ -620,7 +728,9 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
 
 
 def list_cb_workdirs(script_dir: Path):
-    return {p.resolve() for p in script_dir.glob("working.*") if p.is_dir()}
+    cb_dirs = {p.resolve() for p in script_dir.glob("CB.*") if p.is_dir()}
+    legacy_dirs = {p.resolve() for p in script_dir.glob("working.*") if p.is_dir()}
+    return cb_dirs | legacy_dirs
 
 
 def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
@@ -681,7 +791,7 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
     if args.dry_run:
         print("CB dry run enabled; the following command would be executed:")
         print(" ".join(str(arg) for arg in cmd))
-        return (cb_workdir if cb_workdir is not None else Path("working.unknown.unknown.unknown"), None)
+        return (cb_workdir if cb_workdir is not None else Path("CB.unknown.unknown.unknown"), None)
 
     before_workdirs = list_cb_workdirs(script_dir)
     result = run_subprocess(cmd, cwd=script_dir, quiet=args.quiet, verbose=args.verbose)
@@ -768,9 +878,13 @@ def build_asc_local_command(args: argparse.Namespace, ms_path: Path, script_dir:
 
 def submit_dependent_asc_job(args: argparse.Namespace, cb_workdir: Path, cb_final_job_id: str) -> str:
     script_dir = Path(__file__).resolve().parent
+    # Fallback cleanup before run in case post-job cleanup submission fails.
+    archive_old_slurm_artifacts(script_dir, quiet=args.quiet)
     cmd = build_asc_local_command(args, ms_path=cb_workdir, script_dir=script_dir)
 
-    launcher_path = script_dir / "submit_asc_after_cb.sh"
+    slurm_logs_dir = script_dir / "logs" / "slurm"
+    slurm_logs_dir.mkdir(parents=True, exist_ok=True)
+    launcher_path = slurm_logs_dir / "submit_asc_after_cb.sh"
     command_str = " ".join(shlex.quote(str(part)) for part in cmd)
     header_lines = [
         "#!/bin/bash",
@@ -961,6 +1075,27 @@ def main() -> None:
                     f"Submitted dependent ASC job {asc_job_id} "
                     f"(afterok:{cb_final_job_id})."
                 )
+                cleanup_jobname = build_cleanup_jobname(args)
+                try:
+                    cleanup_job_id = submit_post_job_cleanup(args, asc_job_id, cleanup_jobname)
+                except Exception as exc:
+                    print(
+                        "Warning: Could not submit post-job log cleanup. "
+                        "Pre-run cleanup fallback remains active. "
+                        f"Details: {exc}",
+                        file=sys.stderr,
+                    )
+                else:
+                    if cleanup_job_id:
+                        print(
+                            f"Submitted log cleanup job {cleanup_job_id} "
+                            f"(afterany:{asc_job_id}) for group {cleanup_jobname}."
+                        )
+                    else:
+                        print(
+                            "Submitted post-job log cleanup dependency, but could not parse "
+                            "cleanup job id from sbatch output."
+                        )
             else:
                 print(
                     "Submitted ASC follow-up with Slurm dependency, but could not parse "

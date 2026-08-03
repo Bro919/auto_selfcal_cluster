@@ -261,6 +261,23 @@ def is_missing_metadata_value(value: Optional[str]) -> bool:
     return bool(parts) and all(part == "unknown" for part in parts)
 
 
+def is_placeholder_object_name(value: Optional[str]) -> bool:
+    if value is None:
+        return True
+    text = str(value).strip()
+    if not text:
+        return True
+    if is_missing_metadata_value(text):
+        return True
+
+    lower = text.lower()
+    # Reject generated pipeline/workdir labels from fallback path inference.
+    if re.match(r"^(asc|cb|working)[._]", lower):
+        return True
+
+    return False
+
+
 def apply_extracted_metadata(
     workdir: Path,
     project_code: Optional[str] = None,
@@ -782,10 +799,14 @@ def resolve_remote_metadata_from_ms(
 
     if is_missing_metadata_value(args.project_code) and not is_missing_metadata_value(ms_metadata.get("project_code")):
         args.project_code = ms_metadata["project_code"]
-    if is_missing_metadata_value(args.object_name) and not is_missing_metadata_value(ms_metadata.get("object_name")):
+    if is_missing_metadata_value(args.object_name) and not is_placeholder_object_name(ms_metadata.get("object_name")):
         args.object_name = ms_metadata["object_name"]
     if is_missing_metadata_value(args.observation_date) and not is_missing_metadata_value(ms_metadata.get("observation_date")):
         args.observation_date = ms_metadata["observation_date"]
+
+    if is_placeholder_object_name(args.object_name):
+        logger.warning("Ignoring placeholder object_name candidate: %s", args.object_name)
+        args.object_name = None
 
     if "object_name" in required_missing_metadata(args):
         try:
@@ -798,7 +819,7 @@ def resolve_remote_metadata_from_ms(
         except Exception as exc:
             logger.warning("CASA object-name extraction failed: %s", exc)
         else:
-            if casa_object_name:
+            if casa_object_name and not is_placeholder_object_name(casa_object_name):
                 args.object_name = casa_object_name
                 logger.info("Extracted ASC object name from CASA metadata tools: %s", args.object_name)
 

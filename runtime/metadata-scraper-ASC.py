@@ -102,6 +102,14 @@ def is_missing_metadata_value(value):
     return bool(parts) and all(part == "unknown" for part in parts)
 
 
+def is_placeholder_object_name(value):
+    if is_missing_metadata_value(value):
+        return True
+    text = str(value).strip().lower()
+    # Guard against ASC/CB workdir names being mistaken for a source target.
+    return bool(re.match(r"^(asc|cb|working)[._]", text))
+
+
 def infer_metadata_from_path(ms_path, project_code_override=None):
     project_code = project_code_override
     path = Path(ms_path)
@@ -177,7 +185,7 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
         pattern = rf'^{re.escape(project_code)}[._-]+'
         target_candidate = re.sub(pattern, '', target_candidate).strip('._-')
 
-    if is_missing_metadata_value(target_candidate):
+    if is_missing_metadata_value(target_candidate) or is_placeholder_object_name(target_candidate):
         target_candidate = None
 
     if target_candidate is None:
@@ -187,10 +195,11 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
             and parent_name != project_code
             and normalize_date_token(parent_name) is None
             and not is_missing_metadata_value(parent_name)
+            and not is_placeholder_object_name(parent_name)
         ):
             target_candidate = parent_name
 
-    if is_missing_metadata_value(target_candidate):
+    if is_missing_metadata_value(target_candidate) or is_placeholder_object_name(target_candidate):
         target_candidate = None
 
     if date_candidate is None:
@@ -400,7 +409,7 @@ def extract_ms_object_name(ms_path):
     if object_name is None:
         _, path_target, _ = infer_metadata_from_path(ms_path)
         object_name = path_target
-    if is_missing_metadata_value(object_name):
+    if is_missing_metadata_value(object_name) or is_placeholder_object_name(object_name):
         object_name = None
     return object_name
 

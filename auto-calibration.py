@@ -317,10 +317,24 @@ def validate_url_for_pipeline(url: Optional[str], pipeline: str, quiet: bool = F
             "but CB/CB-ASC mode expects a CB archive/tree source (observation directories)."
         )
 
+    if pipeline in {"cb", "cb-asc"} and url_type == "mixed":
+        sys.exit(
+            "Error: The provided URL appears mixed (contains both observation-style and .ms-style content). "
+            "CB/CB-ASC mode requires a CB-only source. Point to the specific CB observation dataset or "
+            "switch to --pipeline asc if you intend to process an ASC .ms source."
+        )
+
     if pipeline == "asc" and url_type == "cb":
         sys.exit(
             "Error: The provided URL looks like a CB-style source (observation directories), "
             "but ASC mode expects an ASC-style source with .ms content."
+        )
+
+    if pipeline == "asc" and url_type == "mixed":
+        sys.exit(
+            "Error: The provided URL appears mixed (contains both CB observation and ASC .ms content). "
+            "ASC mode requires an ASC-only source. Point to the specific .ms-containing directory or "
+            "switch to --pipeline cb when using observation-style CB inputs."
         )
 
 

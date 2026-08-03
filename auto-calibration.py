@@ -145,6 +145,8 @@ def parse_args():
     )
     parser.add_argument(
         "--a-config",
+        "--asc-a-config",
+        dest="asc_a_config",
         action="store_true",
         help="Enable A_config in the ASC prep script.",
     )
@@ -218,6 +220,10 @@ def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
             if saw_url_marker:
                 args.url = token
                 break
+
+    # Backward compatibility for older parser variants that used --a-config -> a_config.
+    if not hasattr(args, "asc_a_config"):
+        args.asc_a_config = bool(getattr(args, "a_config", False))
 
     return args
 

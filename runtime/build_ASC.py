@@ -586,7 +586,8 @@ def main() -> None:
     args.observation_date = args.observation_date or "unknown"
 
     obs_date = args.observation_date
-    workdir_name = f"{args.project_code}.{args.object_name}.{obs_date}"
+    ms_base_name = f"{args.project_code}.{args.object_name}.{obs_date}"
+    workdir_name = f"ASC.{ms_base_name}"
     workdir_path = Path(workdir_name)
     workdir_path.mkdir(parents=True, exist_ok=True)
 
@@ -635,7 +636,7 @@ def main() -> None:
         ms_dirs = find_ms_dirs_under(extracted_roots)
         try:
             _, extracted_project_code, extracted_observation_date = stage_first_ms(
-                ms_dirs, workdir_path, workdir_name, logger
+                ms_dirs, workdir_path, ms_base_name, logger
             )
         except RuntimeError as exc:
             sys.exit(
@@ -677,7 +678,7 @@ def main() -> None:
 
         try:
             _, extracted_project_code, extracted_observation_date = stage_first_ms(
-                ms_dirs, workdir_path, workdir_name, logger
+                ms_dirs, workdir_path, ms_base_name, logger
             )
         except RuntimeError as exc:
             sys.exit(f"Error: {exc}")

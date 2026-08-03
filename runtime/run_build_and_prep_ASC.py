@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Union
 from urllib.parse import urlparse
@@ -22,6 +23,40 @@ def configure_logging(verbose: bool) -> logging.Logger:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(level=level, format="[%(levelname)s] %(message)s")
     return logging.getLogger("run_build_and_prep_ASC")
+
+
+def metadata_logs_dir() -> Path:
+    logs_dir = project_root_dir() / "logs" / "metadata"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return logs_dir
+
+
+def _safe_slug(value: Optional[str]) -> str:
+    text = (value or "unknown").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", text)
+    return cleaned or "unknown"
+
+
+def write_metadata_log(kind: str, metadata: dict, logger: Optional[logging.Logger] = None, source: Optional[str] = None) -> None:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name = f"{timestamp}_{_safe_slug(kind)}.json"
+    output_path = metadata_logs_dir() / file_name
+
+    payload = {
+        "timestamp": timestamp,
+        "kind": kind,
+        "source": source,
+        "metadata": metadata,
+    }
+    try:
+        output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception as exc:
+        if logger:
+            logger.warning("Could not write metadata log %s: %s", output_path, exc)
+        return
+
+    if logger and logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Wrote metadata log: %s", output_path)
 
 
 def log_metadata_summary(
@@ -110,7 +145,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def compute_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
-    return project_root_dir() / f"{project_code}.{object_name}.{observation_date}"
+    return project_root_dir() / f"ASC.{project_code}.{object_name}.{observation_date}"
 
 
 def parse_named_inputs(inputs) -> Tuple[Dict[str, str], list]:
@@ -412,9 +447,17 @@ def scrape_local_metadata(
         raise RuntimeError(result.stderr.strip() or f"{metadata_script.name} failed with code {result.returncode}")
 
     try:
-        return json.loads(result.stdout)
+        metadata = json.loads(result.stdout)
     except ValueError as exc:
         raise RuntimeError(f"Could not parse {metadata_script.name} output: {exc}\nOutput:\n{result.stdout}") from exc
+
+    write_metadata_log(
+        kind="asc_local_source_metadata",
+        metadata=metadata,
+        logger=logger,
+        source=str(input_path),
+    )
+    return metadata
 
 
 def resolve_metadata_from_source(
@@ -728,6 +771,12 @@ def resolve_remote_metadata_from_ms(
     else:
         try:
             ms_metadata = json.loads(result.stdout)
+            write_metadata_log(
+                kind="asc_remote_ms_metadata",
+                metadata=ms_metadata,
+                logger=logger,
+                source=str(ms_path),
+            )
         except json.JSONDecodeError as exc:
             logger.warning("Could not parse metadata output: %s", exc)
 
@@ -752,6 +801,17 @@ def resolve_remote_metadata_from_ms(
             if casa_object_name:
                 args.object_name = casa_object_name
                 logger.info("Extracted ASC object name from CASA metadata tools: %s", args.object_name)
+
+    write_metadata_log(
+        kind="asc_resolved_metadata",
+        metadata={
+            "project_code": args.project_code,
+            "object_name": args.object_name,
+            "observation_date": args.observation_date,
+        },
+        logger=logger,
+        source=str(ms_path),
+    )
 
     return args
 

@@ -566,7 +566,7 @@ def main() -> None:
             + ". Provide project_code object_name observation_date URL/PATH, or use named inputs (e.g., url=...)."
         )
 
-    workdir_name = f"working.{args.project_code}.{args.object_name}.{args.observation_date}"
+    workdir_name = f"CB.{args.project_code}.{args.object_name}.{args.observation_date}"
     workdir_path = Path(workdir_name)
     if workdir_path.exists():
         sys.exit(f"Error: Working directory {workdir_path} already exists.")

@@ -31,6 +31,40 @@ def configure_logging(verbose: bool) -> logging.Logger:
     return logging.getLogger("run_build_and_prep_CB")
 
 
+def metadata_logs_dir() -> Path:
+    logs_dir = project_root_dir() / "logs" / "metadata"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    return logs_dir
+
+
+def _safe_slug(value: Optional[str]) -> str:
+    text = (value or "unknown").strip()
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", text)
+    return cleaned or "unknown"
+
+
+def write_metadata_log(kind: str, metadata: dict, logger: Optional[logging.Logger] = None, source: Optional[str] = None) -> None:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name = f"{timestamp}_{_safe_slug(kind)}.json"
+    output_path = metadata_logs_dir() / file_name
+
+    payload = {
+        "timestamp": timestamp,
+        "kind": kind,
+        "source": source,
+        "metadata": metadata,
+    }
+    try:
+        output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception as exc:
+        if logger:
+            logger.warning("Could not write metadata log %s: %s", output_path, exc)
+        return
+
+    if logger and logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Wrote metadata log: %s", output_path)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -102,7 +136,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def compute_workdir(project_code: str, object_name: str, observation_date: str) -> Path:
-    return project_root_dir() / f"working.{project_code}.{object_name}.{observation_date}"
+    return project_root_dir() / f"CB.{project_code}.{object_name}.{observation_date}"
 
 
 def parse_named_inputs(inputs: List[str]) -> Tuple[Dict[str, str], List[str]]:
@@ -295,9 +329,16 @@ def run_metadata_scraper(script_dir: Path, source_path: Path, project_code_overr
         raise RuntimeError(stderr or f"{selected_script.name} failed with code {result.returncode}")
 
     try:
-        return json.loads(result.stdout)
+        metadata = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Could not parse {selected_script.name} output: {exc}\nOutput:\n{result.stdout}")
+
+    write_metadata_log(
+        kind="cb_source_metadata",
+        metadata=metadata,
+        source=str(source_path),
+    )
+    return metadata
 
 
 def infer_metadata_from_remote_url(url: str, logger: logging.Logger) -> dict:
@@ -376,11 +417,13 @@ def infer_metadata_from_remote_url(url: str, logger: logging.Logger) -> dict:
                 observation_date = parse_mjd_to_date(obs_match.group(1))
                 break
 
-    return {
+    resolved = {
         "project_code": project_code or "unknown",
         "object_name": object_name or "unknown",
         "observation_date": observation_date or "unknown",
     }
+    write_metadata_log(kind="cb_remote_url_metadata", metadata=resolved, logger=logger, source=url)
+    return resolved
 
 
 def infer_metadata_from_source(script_dir: Path, source: str, logger: logging.Logger) -> dict:

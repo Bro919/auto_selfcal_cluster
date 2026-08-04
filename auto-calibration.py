@@ -55,9 +55,16 @@ def parse_args():
     parser.add_argument("--cb-temp-dir", help="Optional temporary directory for CB downloads and extraction")
 
     parser.add_argument(
+        "--cb-skip-submit",
+        dest="cb_submit",
+        action="store_false",
+        help="Skip CB batch job submission after build/prep.",
+    )
+    parser.add_argument(
         "--cb-submit",
+        dest="cb_submit",
         action="store_true",
-        help="Submit CB batch jobs after build/prep. By default the wrapper skips CB submission.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--cb-wait-seconds",
@@ -69,7 +76,7 @@ def parse_args():
         "--cb-asc-wait-for-cb",
         action="store_true",
         help=(
-            "In cb-asc mode with --cb-submit, wait in the foreground for CB completion "
+            "In cb-asc mode (with CB submission enabled by default), wait in the foreground for CB completion "
             "before launching ASC. Default behavior submits ASC with a Slurm dependency "
             "and exits immediately."
         ),
@@ -180,6 +187,7 @@ def parse_args():
         action="store_true",
         help="Dry-run the combined workflow and print CB/ASC commands instead of executing them.",
     )
+    parser.set_defaults(cb_submit=True)
     return parser.parse_args()
 
 
@@ -735,7 +743,7 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
             sys.exit(
                 "Error: auto-image config points to a measurement set that does not exist: "
                 f"{ms_path}. In CB mode this usually means calibration was prepared but not run yet. "
-                "Run CB with --cb-submit (or manually submit run_casa_pipescript.sh) before auto-image."
+                "Run CB without --cb-skip-submit (or manually submit run_casa_pipescript.sh) before auto-image."
             )
 
     casa_executable = args.auto_image_casa_executable
@@ -1057,7 +1065,8 @@ def main() -> None:
         if find_ms_directory(cb_workdir) is None:
             print(
                 "CB build/prep completed. Skipping standalone auto-image because no measurement set was "
-                "found yet in the CB workdir. Submit/run CB calibration first (e.g. --cb-submit), then "
+                "found yet in the CB workdir. Submit/run CB calibration first (default behavior unless "
+                "--cb-skip-submit is set), then "
                 "run auto-image."
             )
             print("CB pipeline completed successfully (build+prep only).")
@@ -1096,7 +1105,7 @@ def main() -> None:
 
     if pipeline == "cb-asc":
         if not args.cb_submit and not args.skip_cb:
-            print("CB-ASC mode requires CB submission; enabling --cb-submit automatically.")
+            print("CB-ASC mode requires CB submission; ignoring --cb-skip-submit.")
             args.cb_submit = True
 
     cb_workdir, cb_final_job_id = run_cb_workflow(args)

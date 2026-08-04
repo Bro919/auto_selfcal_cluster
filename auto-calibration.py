@@ -42,7 +42,10 @@ def parse_args():
     parser.add_argument("--cb-workdir", help="Existing CB working directory to use instead of running build/prep")
     parser.add_argument(
         "--asc-ms-path",
-        help="Path to a local .ms directory or parent directory containing one for ASC-only mode",
+        help=(
+            "Path to a local .ms directory or parent directory containing one "
+            "(ASC mode, and optional bootstrap input for auto-image mode)"
+        ),
     )
     parser.add_argument("--skip-cb", action="store_true", help="Skip CB build/prep and use --cb-workdir directly")
     parser.add_argument("--cb-template", default="CB", help="Path to the CB template directory")
@@ -111,6 +114,30 @@ def parse_args():
     parser.add_argument(
         "--auto-image-workdir",
         help="Existing working directory containing auto-image-VLA and config.yaml for standalone auto-image mode.",
+    )
+    parser.add_argument(
+        "--auto-image-ms-path",
+        help=(
+            "Path to a local .ms directory (or parent directory containing one) used to bootstrap "
+            "a standalone auto-image working directory and config.yaml"
+        ),
+    )
+    parser.add_argument(
+        "--auto-image-source-name",
+        help="Source name to write into auto-image-VLA/config.yaml during bootstrap mode.",
+    )
+    parser.add_argument(
+        "--auto-image-size",
+        type=int,
+        default=512,
+        help="image_size value written to auto-image-VLA/config.yaml in bootstrap mode (default: 512).",
+    )
+    parser.add_argument(
+        "--auto-image-split",
+        type=str,
+        default="both",
+        choices=["whole", "halves", "both"],
+        help="split value written to auto-image-VLA/config.yaml in bootstrap mode (default: both).",
     )
     parser.add_argument(
         "--auto-image-submit",
@@ -383,6 +410,136 @@ def infer_metadata_from_workdir(cb_workdir: Path):
             _, project_code, object_name, observation_date = parts
             return project_code, object_name, observation_date
     return None
+
+
+def resolve_existing_path(path_value: str, script_dir: Path) -> Path:
+    raw = Path(path_value).expanduser()
+    if raw.is_absolute():
+        return raw
+
+    candidates = [
+        Path.cwd() / raw,
+        script_dir / raw,
+        script_dir.parent / raw,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    return candidates[-1]
+
+
+def copy_tree(src: Path, dst: Path) -> None:
+    src = Path(src)
+    dst = Path(dst)
+
+    if src.resolve() == dst.resolve():
+        print(f"Skipping copy because source and destination are the same: {src}")
+        return
+
+    dst.mkdir(parents=True, exist_ok=True)
+    ignore_names = shutil.ignore_patterns(".git", ".hg", ".svn", "*.lock")
+
+    for item in src.iterdir():
+        if item.name in {".git", ".hg", ".svn"}:
+            continue
+
+        src_item = src / item.name
+        dst_item = dst / item.name
+        if src_item.resolve() == dst_item.resolve():
+            continue
+
+        if src_item.is_dir():
+            if dst_item.exists():
+                shutil.rmtree(str(dst_item))
+            shutil.copytree(
+                str(src_item),
+                str(dst_item),
+                ignore=ignore_names,
+                ignore_dangling_symlinks=True,
+            )
+        else:
+            shutil.copy2(str(src_item), str(dst_item))
+
+
+def write_auto_image_config(
+    auto_image_dir: Path,
+    measurement_set_path: Path,
+    source_name: str,
+    image_size: int,
+    split: str,
+) -> None:
+    config_example = auto_image_dir / "config.example.yaml"
+    config_target = auto_image_dir / "config.yaml"
+
+    if config_example.exists():
+        text = config_example.read_text(encoding="utf-8")
+    else:
+        text = (
+            "measurement_set: \"path/to/data.ms\"\n"
+            "source_name: \"target\"\n"
+            "image_size: 512\n"
+        )
+
+    replacements = {
+        "measurement_set": str(measurement_set_path.resolve()),
+        "source_name": source_name,
+        "image_size": str(image_size),
+        "split": split,
+    }
+
+    def replace_key(content: str, key: str, value: str) -> str:
+        pattern = re.compile(rf"^(\\s*{re.escape(key)}\\s*:\\s*).*$", re.MULTILINE)
+        if pattern.search(content):
+            def replacer(match: re.Match) -> str:
+                prefix = match.group(1)
+                if key == "image_size":
+                    return f"{prefix}{value}"
+                return f'{prefix}"{value}"'
+
+            return pattern.sub(replacer, content, count=1)
+        if key == "image_size":
+            return content.rstrip() + f"\n{key}: {value}\n"
+        return content.rstrip() + f"\n{key}: \"{value}\"\n"
+
+    for key, value in replacements.items():
+        text = replace_key(text, key, value)
+
+    config_target.write_text(text, encoding="utf-8")
+    print(f"Wrote auto-image config: {config_target}")
+
+
+def derive_source_name_for_auto_image(args: argparse.Namespace, ms_path: Path) -> str:
+    if args.auto_image_source_name:
+        return args.auto_image_source_name
+    if args.asc_source_name:
+        return args.asc_source_name
+    return ms_path.stem
+
+
+def bootstrap_auto_image_workdir(
+    args: argparse.Namespace,
+    script_dir: Path,
+    workdir: Path,
+    ms_path: Path,
+) -> Path:
+    auto_image_vla_src = resolve_existing_path(args.cb_auto_image_vla, script_dir)
+    if not auto_image_vla_src.exists() or not auto_image_vla_src.is_dir():
+        sys.exit(f"Error: auto-image-VLA directory not found: {auto_image_vla_src}")
+
+    workdir.mkdir(parents=True, exist_ok=True)
+    auto_image_vla_dst = workdir / auto_image_vla_src.name
+    print(f"Copying auto-image-VLA from {auto_image_vla_src} into {auto_image_vla_dst}")
+    copy_tree(auto_image_vla_src, auto_image_vla_dst)
+
+    write_auto_image_config(
+        auto_image_vla_dst,
+        ms_path,
+        derive_source_name_for_auto_image(args, ms_path),
+        args.auto_image_size,
+        args.auto_image_split,
+    )
+    return auto_image_vla_dst
 
 
 def run_subprocess(command, cwd: Path, quiet: bool = False, verbose: bool = False) -> subprocess.CompletedProcess:
@@ -687,19 +844,46 @@ def submit_post_job_cleanup(args: argparse.Namespace, after_job_id: str, jobname
 def run_auto_image_workflow(args: argparse.Namespace) -> None:
     script_dir = Path(__file__).resolve().parent
     workdir_input = args.auto_image_workdir or args.cb_workdir
-    if not workdir_input:
-        sys.exit("Error: auto-image mode requires --auto-image-workdir (or --cb-workdir).")
+    ms_input = args.auto_image_ms_path or args.asc_ms_path
+    auto_image_dir = None
+    config_path = None
 
-    workdir = Path(workdir_input).expanduser()
-    if not workdir.is_absolute():
-        workdir = script_dir / workdir
-    workdir = workdir.resolve()
+    if workdir_input:
+        workdir = Path(workdir_input).expanduser()
+        if not workdir.is_absolute():
+            workdir = script_dir / workdir
+        workdir = workdir.resolve()
 
-    if not workdir.exists() or not workdir.is_dir():
-        sys.exit(f"Error: auto-image workdir not found: {workdir}")
+        if not workdir.exists() or not workdir.is_dir():
+            sys.exit(f"Error: auto-image workdir not found: {workdir}")
 
-    auto_image_dir = workdir / "auto-image-VLA"
-    config_path = auto_image_dir / "config.yaml"
+        auto_image_dir = workdir / "auto-image-VLA"
+        config_path = auto_image_dir / "config.yaml"
+
+        if (not auto_image_dir.exists() or not config_path.exists()) and ms_input:
+            ms_source = Path(ms_input).expanduser()
+            ms_path = find_ms_directory(ms_source)
+            if ms_path is None:
+                sys.exit(f"Error: Could not locate a .ms measurement set under {ms_source}.")
+            auto_image_dir = bootstrap_auto_image_workdir(args, script_dir, workdir, ms_path)
+            config_path = auto_image_dir / "config.yaml"
+    else:
+        if not ms_input:
+            sys.exit(
+                "Error: auto-image mode requires --auto-image-workdir (or --cb-workdir), "
+                "or provide --auto-image-ms-path/--asc-ms-path to bootstrap a new workdir."
+            )
+        ms_source = Path(ms_input).expanduser()
+        ms_path = find_ms_directory(ms_source)
+        if ms_path is None:
+            sys.exit(f"Error: Could not locate a .ms measurement set under {ms_source}.")
+
+        workdir = script_dir / f"AUTO_IMAGE.{ms_path.stem}"
+        if not args.quiet:
+            print(f"Bootstrapping auto-image workdir: {workdir}")
+        auto_image_dir = bootstrap_auto_image_workdir(args, script_dir, workdir, ms_path)
+        config_path = auto_image_dir / "config.yaml"
+
     auto_image_script = auto_image_dir / "run-auto-image.py"
 
     if args.auto_image_submit:

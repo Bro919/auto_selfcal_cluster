@@ -717,6 +717,27 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
     if not config_path.exists():
         sys.exit(f"Error: auto-image config not found: {config_path}")
 
+    measurement_set = None
+    try:
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("measurement_set:"):
+                _, raw_value = line.split(":", 1)
+                measurement_set = raw_value.strip().strip('"').strip("'")
+                break
+    except Exception:
+        measurement_set = None
+
+    if measurement_set:
+        ms_path = Path(measurement_set).expanduser()
+        if not ms_path.is_absolute():
+            ms_path = (auto_image_dir / ms_path).resolve()
+        if not ms_path.exists():
+            sys.exit(
+                "Error: auto-image config points to a measurement set that does not exist: "
+                f"{ms_path}. In CB mode this usually means calibration was prepared but not run yet. "
+                "Run CB with --cb-submit (or manually submit run_casa_pipescript.sh) before auto-image."
+            )
+
     casa_executable = args.auto_image_casa_executable
     commands = []
     install_code = (
@@ -1031,6 +1052,15 @@ def main() -> None:
                     "Error: CB submission was requested but no SLURM job ID was detected from CB output."
                 )
             print("CB pipeline and chained auto-image completed successfully.")
+            return
+
+        if find_ms_directory(cb_workdir) is None:
+            print(
+                "CB build/prep completed. Skipping standalone auto-image because no measurement set was "
+                "found yet in the CB workdir. Submit/run CB calibration first (e.g. --cb-submit), then "
+                "run auto-image."
+            )
+            print("CB pipeline completed successfully (build+prep only).")
             return
 
         print("Running standalone auto-image after CB workflow completion.")

@@ -1054,12 +1054,12 @@ def main() -> None:
         if args.cb_submit:
             print("CB submission includes auto-image chaining via Slurm dependency.")
             if cb_final_job_id:
-                wait_for_slurm_job_completion(cb_final_job_id, args.cb_wait_seconds, quiet=args.quiet)
+                print(f"CB submitted successfully. Final chained job id: {cb_final_job_id}")
             else:
-                sys.exit(
-                    "Error: CB submission was requested but no SLURM job ID was detected from CB output."
+                print(
+                    "CB submission completed, but the final SLURM job id could not be parsed from output."
                 )
-            print("CB pipeline and chained auto-image completed successfully.")
+            print("CB pipeline submission complete.")
             return
 
         if find_ms_directory(cb_workdir) is None:

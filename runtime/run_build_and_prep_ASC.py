@@ -1016,10 +1016,6 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
     script_dir = runtime_dir()
     workdir = compute_workdir(build_project_code, build_object, build_date)
 
-    def list_asc_workdirs() -> set:
-        root = project_root_dir()
-        return {p.resolve() for p in root.glob("ASC.*") if p.is_dir()}
-
     build_cmd = [
         sys.executable,
         str(script_dir / "build_ASC.py"),
@@ -1047,24 +1043,8 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
         logger.info("Planned workdir: %s", workdir)
         return
 
-    before_workdirs = list_asc_workdirs()
     logger.info("Running build_ASC.py")
     run_checked(build_cmd, cwd=project_root_dir(), logger=logger, description="Launching build helper")
-    after_workdirs = list_asc_workdirs()
-
-    if not workdir.exists():
-        created = sorted(after_workdirs - before_workdirs)
-        if len(created) == 1:
-            workdir = created[0]
-            logger.info("Using newly created ASC workdir: %s", workdir)
-        elif len(created) > 1:
-            workdir = max(created, key=lambda p: p.stat().st_mtime)
-            logger.info("Multiple ASC workdirs created; using most recent: %s", workdir)
-        else:
-            asc_dirs = sorted(after_workdirs, key=lambda p: p.stat().st_mtime)
-            if asc_dirs:
-                workdir = asc_dirs[-1]
-                logger.info("Expected ASC workdir missing; using most recent existing workdir: %s", workdir)
 
     logger.info("Locating measurement set in workdir")
     ms_path = find_ms_directory(workdir)

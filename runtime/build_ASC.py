@@ -73,85 +73,6 @@ def infer_metadata_from_ms_path(ms_dir: Path) -> Tuple[Optional[str], Optional[s
     return project_code, observation_date
 
 
-def is_missing_metadata_value(value: Optional[str]) -> bool:
-    if value is None:
-        return True
-    text = str(value).strip()
-    if not text:
-        return True
-    if text.lower() == "unknown":
-        return True
-    parts = [part for part in re.split(r"[._]+", text.lower()) if part]
-    return bool(parts) and all(part == "unknown" for part in parts)
-
-
-def is_placeholder_object_name(value: Optional[str]) -> bool:
-    if is_missing_metadata_value(value):
-        return True
-    return bool(re.match(r"^(asc|cb|working)[._]", str(value).strip().lower()))
-
-
-def infer_object_name_from_ms_path(ms_rel_path: str, project_code: Optional[str], observation_date: Optional[str]) -> Optional[str]:
-    if not ms_rel_path:
-        return None
-
-    path = Path(ms_rel_path)
-    segments = [path.name] + [parent.name for parent in path.parents if parent.name]
-
-    def _infer_target_from_parts(parts: List[str], known_project_code: Optional[str], known_date: Optional[str]) -> Optional[str]:
-        if len(parts) < 3:
-            return None
-
-        project_idx = None
-        if known_project_code and known_project_code in parts:
-            project_idx = parts.index(known_project_code)
-        elif re.match(r"^[0-9]{2}[A-Z]-[0-9]{3}$", parts[0]):
-            project_idx = 0
-
-        date_idx = None
-        if known_date:
-            for idx, part in enumerate(parts):
-                if normalize_date_token(part) == known_date:
-                    date_idx = idx
-                    break
-
-        if project_idx is not None and date_idx is not None and project_idx < date_idx - 1:
-            candidate = ".".join(parts[project_idx + 1 : date_idx]).strip(".")
-            return candidate or None
-
-        if date_idx is not None and date_idx > 1:
-            candidate = ".".join(parts[1:date_idx]).strip(".")
-            return candidate or None
-
-        candidate = ".".join(parts[1:-1]).strip(".")
-        return candidate or None
-
-    target_candidate = None
-    for segment in segments:
-        parts = segment.split(".")
-        if len(parts) < 3:
-            continue
-        candidate = _infer_target_from_parts(parts, project_code, observation_date)
-        if candidate:
-            target_candidate = candidate
-            break
-
-    if target_candidate and project_code:
-        pattern = rf"^{re.escape(project_code)}[._-]+"
-        target_candidate = re.sub(pattern, "", target_candidate).strip("._-")
-
-    if is_placeholder_object_name(target_candidate):
-        return None
-    return target_candidate
-
-
-def infer_metadata_from_remote_ms_rel_path(ms_rel_path: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    ms_path = Path(ms_rel_path)
-    project_code, observation_date = infer_metadata_from_ms_path(ms_path)
-    object_name = infer_object_name_from_ms_path(ms_rel_path, project_code, observation_date)
-    return project_code, object_name, observation_date
-
-
 def print_download_progress(blocks: int, block_size: int, total_size: int) -> None:
     if total_size <= 0:
         return
@@ -660,33 +581,9 @@ def main() -> None:
             "Usage error: URL must be provided with --url or positional url=<value> or raw URL argument."
         )
 
-    base_url = args.url.rstrip("/")
-    dir_url = base_url
-
-    logger.info("Searching remote source for .ms directory...")
-    ms_info = find_first_ms_dir(base_url, logger)
-    initial_project_code = args.project_code or "unknown"
-    if not ms_info and initial_project_code != "unknown":
-        dir_url = f"{base_url}/{initial_project_code}"
-        logger.info("No .ms at base URL; trying project path: %s", dir_url)
-        ms_info = find_first_ms_dir(dir_url, logger)
-
     args.project_code = args.project_code or "unknown"
     args.object_name = args.object_name or "unknown"
     args.observation_date = args.observation_date or "unknown"
-
-    if ms_info:
-        ms_rel_path_probe, _ = ms_info
-        probe_project_code, probe_object_name, probe_observation_date = infer_metadata_from_remote_ms_rel_path(ms_rel_path_probe)
-        if args.project_code == "unknown" and probe_project_code:
-            args.project_code = probe_project_code
-            print(f"Pre-probe extracted project code: {probe_project_code}")
-        if args.object_name == "unknown" and probe_object_name:
-            args.object_name = probe_object_name
-            print(f"Pre-probe extracted object name: {probe_object_name}")
-        if args.observation_date == "unknown" and probe_observation_date:
-            args.observation_date = probe_observation_date
-            print(f"Pre-probe extracted observation date: {probe_observation_date}")
 
     obs_date = args.observation_date
     ms_base_name = f"{args.project_code}.{args.object_name}.{obs_date}"
@@ -696,6 +593,16 @@ def main() -> None:
 
     extracted_project_code = None
     extracted_observation_date = None
+
+    base_url = args.url.rstrip("/")
+    dir_url = base_url
+
+    logger.info("Searching remote source for .ms directory...")
+    ms_info = find_first_ms_dir(base_url, logger)
+    if not ms_info and args.project_code != "unknown":
+        dir_url = f"{base_url}/{args.project_code}"
+        logger.info("No .ms at base URL; trying project path: %s", dir_url)
+        ms_info = find_first_ms_dir(dir_url, logger)
 
     if ms_info:
         ms_rel_path, ms_url = ms_info

@@ -12,6 +12,21 @@ def _read_scripts(path):
         return [line.strip() for line in handle if line.strip()]
 
 
+def _sanitize_mpicasa_quiet(script_path):
+    with open(script_path, 'r', encoding='utf-8') as handle:
+        content = handle.read()
+
+    updated = content.replace('mpicasa -quiet ', 'mpicasa ')
+    if updated == content:
+        return False
+
+    with open(script_path, 'w', encoding='utf-8') as handle:
+        handle.write(updated)
+
+    print(f"Patched unsupported mpicasa -quiet in {script_path}")
+    return True
+
+
 def _submit_script(script_path, dependency=None):
     command = ['sbatch', '--parsable']
     if dependency:
@@ -52,6 +67,9 @@ if missing:
     for path in missing:
         print(f"Script does not exist: {path}")
     sys.exit(1)
+
+for path in scripts:
+    _sanitize_mpicasa_quiet(path)
 
 cleanup_candidates = [path for path in scripts if os.path.basename(path) == cleanup_script_name]
 cleanup_script = cleanup_candidates[-1] if cleanup_candidates else None

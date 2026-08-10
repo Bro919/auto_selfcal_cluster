@@ -5,7 +5,7 @@ My main use case has been on the NRAO cluster, read through Jimmy's repo to get 
 
 ## Making use of auto-calibration
 The main wrapper that you should be using is the auto-calibraiton.py in the main directory. It calls other scripts and wrappers that are in the Auto-SelfCal (ASC), Calibration (CB) and runtime directories. Where it downloads and sets up a main working directory, prepares the data and submits the slurm job to a node. Being able to deal with both SDM-BDF dataset for inital calibration (CB) to create a .ms directroy, running a Auto-SelfCal (ASC) on an already create .ms directory, or if already predetermined CB directly into ASC. 
-auto-calibration has lots of extra flags and parameters that can be used to customize how it's ran. Please leave them at default unless you know what you are doing. I will list some possibly useful ones at the bottem of the README.
+auto-calibration has lots of extra flags and parameters that can be used to customize how it's ran. Please leave them at default unless you know what you are doing.
 
 # Setup
 Since I have mostly done this project on the Cluster that is what I will default to when talking about getting auto-cal to work.
@@ -64,7 +64,7 @@ You can also set them up to chain, where it runs cb then asc on the dataset one 
 ## In Progress (Check status)
 This will then cause it to download and build the working directory denoted by ASC.'projectname'.'objectname'.'observationdate' or CB.'projectname'.'objectname'.'observationdate' respectively. Depending on how large the dataset is it could take a while to download and the terminal must stay open during the whole process til the job is submitted.
 You can check if the jobs are running with `squeue -l --me` as long as you're still on an interactive node. This will give you a basic look at what is running. If you want more details you can run:
-`sacctu`
+`sacct -u nm-XXXXX --format=NodeList,JobID,JobName%90,State,Start,End`
 
 As I said earlier CB will usually finish within a day no matter the dataset size. Whereas for ASC Depending on the config it could take a while to complete. With the sacctu command you can see how long it has been running, how much time it has left before its stopped and the name of the job. You'll likely never to look at this unless you are running ASC since it's more computationally intensive and can run out of memory when dealing with larger configs.
 

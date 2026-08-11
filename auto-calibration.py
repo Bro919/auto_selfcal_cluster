@@ -486,19 +486,25 @@ def write_auto_image_config(
         "source_name": source_name,
         "image_size": str(image_size),
         "split": split,
+        # Default to full multi-band imaging behavior unless explicitly edited later.
+        "use_single_band": "False",
+        # Ensure imfit summary CSV and per-image fit outputs are written.
+        "write_results": "True",
     }
 
     def replace_key(content: str, key: str, value: str) -> str:
-        pattern = re.compile(rf"^(\\s*{re.escape(key)}\\s*:\\s*).*$", re.MULTILINE)
+        pattern = re.compile(rf"^(\s*{re.escape(key)}\s*:\s*).*$", re.MULTILINE)
+        bool_keys = {"use_single_band", "try_point_source", "print_results", "write_results", "write_regions", "override_sfr_request"}
+        numeric_keys = {"image_size"}
         if pattern.search(content):
             def replacer(match: re.Match) -> str:
                 prefix = match.group(1)
-                if key == "image_size":
+                if key in numeric_keys or key in bool_keys:
                     return f"{prefix}{value}"
                 return f'{prefix}"{value}"'
 
             return pattern.sub(replacer, content, count=1)
-        if key == "image_size":
+        if key in numeric_keys or key in bool_keys:
             return content.rstrip() + f"\n{key}: {value}\n"
         return content.rstrip() + f"\n{key}: \"{value}\"\n"
 

@@ -115,6 +115,41 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
     path = Path(ms_path)
     segments = [path.name] + [Path(seg).name for seg in path.parents]
 
+    def infer_target_from_cb_workdir(workdir_name, project_code, observation_date):
+        """
+        Extract object name from CB-style workdir format: CB.<project>.<target>.<date>
+        or ASC-style: ASC.<project>.<target>.<date>
+        """
+        if not workdir_name or not project_code or not observation_date:
+            return None
+        
+        # Check if this looks like CB.* or ASC.* workdir format
+        if not re.match(r'^(CB|ASC)[._]', workdir_name):
+            return None
+        
+        # Split on dots and underscores
+        parts = re.split(r'[._]', workdir_name)
+        
+        # Format is PREFIX.PROJECT.TARGET.DATE (or with underscores)
+        # We need to find the project and date indices to extract target between them
+        project_idx = None
+        date_idx = None
+        
+        for idx, part in enumerate(parts):
+            if part == project_code:
+                project_idx = idx
+            # Match date patterns (YYYY-MM-DD or YYYYMMDD)
+            if normalize_date_token(part) == observation_date:
+                date_idx = idx
+        
+        if project_idx is not None and date_idx is not None and project_idx < date_idx - 1:
+            # Extract tokens between project and date
+            candidate = '.'.join(parts[project_idx + 1:date_idx]).strip('.')
+            if candidate and not is_missing_metadata_value(candidate) and not is_placeholder_object_name(candidate):
+                return candidate
+        
+        return None
+
     def infer_target_from_parts(parts, known_project_code, known_date):
         if len(parts) < 3:
             return None
@@ -152,19 +187,51 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
     date_candidate = None
     target_candidate = None
 
+    # First, try to extract metadata from CB/ASC workdir format in parent directories
+    # This handles cases like CB.24A-322.AT2020neh.2024-08-01 or ASC.24A-322.AT2020neh.2024-08-01
+    cb_asc_segment = None
     for segment in segments:
-        parts = segment.split('.')
-        for candidate in [segment] + parts:
-            maybe_date = normalize_date_token(candidate)
+        if re.match(r'^(CB|ASC)[._]', segment):
+            cb_asc_segment = segment
+            break
+    
+    if cb_asc_segment:
+        # Found a CB/ASC workdir format; extract project and date from this segment
+        parts = cb_asc_segment.split('.')
+        
+        # Extract project code if not already found
+        if project_code is None:
+            for part in parts:
+                if re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', part):
+                    project_code = part
+                    break
+        
+        # Extract date from this segment
+        for part in parts:
+            maybe_date = normalize_date_token(part)
             if maybe_date:
                 date_candidate = maybe_date
-                if project_code is None and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parts[0]):
-                    project_code = parts[0]
-                if len(parts) >= 3:
-                    target_candidate = infer_target_from_parts(parts, project_code, date_candidate)
                 break
-        if date_candidate is not None:
-            break
+        
+        # Extract target from CB/ASC workdir format
+        if project_code and date_candidate:
+            target_candidate = infer_target_from_cb_workdir(cb_asc_segment, project_code, date_candidate)
+    
+    # If CB/ASC format didn't yield a date, look for date in other segments
+    if date_candidate is None:
+        for segment in segments:
+            parts = segment.split('.')
+            for candidate in [segment] + parts:
+                maybe_date = normalize_date_token(candidate)
+                if maybe_date:
+                    date_candidate = maybe_date
+                    if project_code is None and re.match(r'^[0-9]{2}[A-Z]-[0-9]{3}$', parts[0]):
+                        project_code = parts[0]
+                    if len(parts) >= 3 and target_candidate is None and not cb_asc_segment:
+                        target_candidate = infer_target_from_parts(parts, project_code, date_candidate)
+                    break
+            if date_candidate is not None:
+                break
 
     if date_candidate is None:
         for segment in segments:
@@ -175,7 +242,7 @@ def infer_metadata_from_path(ms_path, project_code_override=None):
 
     if target_candidate is None and project_code and date_candidate:
         for segment in segments:
-            if project_code in segment and date_candidate.replace('-', '') in segment:
+            if project_code in segment and date_candidate.replace('-', '') in segment and segment != cb_asc_segment:
                 parts = segment.split('.')
                 if len(parts) >= 3:
                     target_candidate = infer_target_from_parts(parts, project_code, date_candidate)
@@ -356,6 +423,8 @@ def extract_ms_object_name(ms_path):
         return extracted["object_name"]
 
     object_name = None
+    
+    # First try: look for a source name in the SOURCE table
     if TABLE_BACKEND:
         table = None
         try:
@@ -380,37 +449,58 @@ def extract_ms_object_name(ms_path):
             if table is not None:
                 close_ms_table(table)
 
-    if object_name is None:
-        # Fallback to field table object name
-        if TABLE_BACKEND:
-            table = None
+    # Second fallback: look for a TARGET-intent field name in the FIELD table
+    if object_name is None and TABLE_BACKEND:
+        table = None
+        try:
+            table = open_ms_table(ms_path, "FIELD")
+            field_names = []
+            field_intents = []
+            
+            # Try to get FIELD.NAME
             try:
-                table = open_ms_table(ms_path, "FIELD")
-                for column_name in ["NAME", "name", "FIELD_NAME"]:
-                    try:
-                        values = normalize_column_values(table.getcol(column_name))
-                    except Exception:
-                        continue
-                    for value in values:
-                        if value is None:
-                            continue
-                        text = str(value).strip()
-                        if not is_missing_metadata_value(text):
-                            object_name = text
-                            break
-                    if object_name:
-                        break
+                field_names = normalize_column_values(table.getcol("NAME"))
+            except Exception:
+                try:
+                    field_names = normalize_column_values(table.getcol("name"))
+                except Exception:
+                    pass
+            
+            # Try to get SOURCE_ID to link with SOURCE table
+            source_ids = []
+            try:
+                source_ids = normalize_column_values(table.getcol("SOURCE_ID"))
             except Exception:
                 pass
-            finally:
-                if table is not None:
-                    close_ms_table(table)
+            
+            # Look for CODE column as fallback
+            if not field_names:
+                try:
+                    field_names = normalize_column_values(table.getcol("CODE"))
+                except Exception:
+                    pass
+            
+            # Select the first non-calibration field name if available
+            for name in field_names:
+                if name is not None:
+                    text = str(name).strip()
+                    if not is_missing_metadata_value(text) and not is_placeholder_object_name(text):
+                        object_name = text
+                        break
+        except Exception:
+            pass
+        finally:
+            if table is not None:
+                close_ms_table(table)
 
     if object_name is None:
+        # Fallback to path-based inference
         _, path_target, _ = infer_metadata_from_path(ms_path)
         object_name = path_target
+    
     if is_missing_metadata_value(object_name) or is_placeholder_object_name(object_name):
         object_name = None
+    
     return object_name
 
 

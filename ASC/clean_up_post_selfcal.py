@@ -1,8 +1,65 @@
 import argparse
 import shutil
 import os
+import sys
 from pathlib import Path
 import re
+import pandas as pd
+
+
+def _load_point_source_fitters():
+    """Import the fit helper functions used by auto-image-VLA."""
+    auto_image_dir = Path(__file__).resolve().parents[1] / "repo" / "auto-image-VLA"
+    helper_path = auto_image_dir / "helper_functions.py"
+    if not helper_path.exists():
+        raise FileNotFoundError(
+            "Could not find repo/auto-image-VLA/helper_functions.py; point-source fitting requires the auto-image-VLA repo."
+        )
+    if str(auto_image_dir) not in sys.path:
+        sys.path.insert(0, str(auto_image_dir))
+    from helper_functions import fit_point_source_basic
+
+    return fit_point_source_basic
+
+
+def discover_final_image_paths(final_files_directory: Path):
+    image_paths = sorted(final_files_directory.rglob("*.image.tt0"))
+    return [p for p in image_paths if p.is_file()]
+
+
+def create_imfitresults_csv(final_files_directory: Path):
+    """Fit a point source at the center of each collected image and save the results to final_files."""
+    final_files_directory = Path(final_files_directory)
+    image_paths = discover_final_image_paths(final_files_directory)
+    if not image_paths:
+        print(f"No final image products found under {final_files_directory}; skipping point-source fit summary.")
+        return None
+
+    fit_point_source_basic = _load_point_source_fitters()
+    fit_results = []
+    original_cwd = Path.cwd()
+    for image_path in image_paths:
+        try:
+            os.chdir(image_path.parent)
+            result = fit_point_source_basic(str(image_path), print_results=False, write_results=False)
+            fit_results.append(result)
+        except Exception as exc:
+            print(f"Warning: failed to fit point source for {image_path}: {exc}")
+        finally:
+            os.chdir(original_cwd)
+
+    if not fit_results:
+        print(f"No point-source fits succeeded for images under {final_files_directory}.")
+        return None
+
+    results_df = pd.DataFrame(fit_results)
+    output_path = final_files_directory / "imfitresults.csv"
+    results_df.to_csv(output_path, index=False)
+
+    legacy_path = final_files_directory / "all_fit_results.csv"
+    results_df.to_csv(legacy_path, index=False)
+    print(f"Wrote imfit results to {output_path} and {legacy_path}.")
+    return output_path
 
 def get_frequencies_from_dirs(root_dir):
     """
@@ -151,3 +208,6 @@ if concat_final_ms:
     if not os.path.exists(str(destination_dir / source_file.name)):
         shutil.move(str(source_file), str(destination_dir / source_file.name))
         print(f"Moved final self_cal ms to final_files directory")
+
+# after collecting the final products, generate the imfit CSV summary from the final image set
+create_imfitresults_csv(Path(final_files_directory))

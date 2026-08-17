@@ -37,11 +37,9 @@ Run `squeue -l --me` to see which node was assigned, then use `ssh nmpostXXX` to
 
 Go to your main directory with `cd`, then clone the repo:
 ```git clone --recurse-submodules https://github.com/Odyia/auto_selfcal_cluster
-```
 
 If you already cloned it without submodules, run:
-```git submodule update --init --recursive
-```
+```git submodule update --init --recursive```
 
 You may need to `cd` into the repo before running that command.
 

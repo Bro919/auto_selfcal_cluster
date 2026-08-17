@@ -45,7 +45,7 @@ If you already cloned it without submodules, run:
 git submodule update --init --recursive
 ```
 
-You may need to `cd` into the repo before running that command.
+You may need to `cd` into the repo before running the submodule install.
 
 ## Contents
 As mentioned above, you should mainly use the auto-calibration wrapper. The main wrapper scripts are in runtime, while CB/ASC specific scripts are in their respective directories. The logs directory collects Slurm and metadata outputs to keep the main directory cleaner, and submodules are stored in repo.
@@ -72,31 +72,47 @@ To run, enter the directory:
 
 ### Running CB
 For CB:
-`python auto-calibration.py --pipeline cb --url 'your-link-goes-here'`
+```
+python auto-calibration.py --pipeline cb --url 'your-link-goes-here'
+```
 
 If your SDM-BDF source is local (not a URL), still use --url, but point it to the local path:
-`python auto-calibration.py --pipeline cb --url '/path/to/local/SDM-BDF-or-observation-dir'`
+```
+python auto-calibration.py --pipeline cb --url '/path/to/local/SDM-BDF-or-observation-dir'
+```
 
 Only use --skip-cb if you already have a prepared CB working directory and want to reuse it without rebuilding:
-`python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb`
+```
+python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip-cb
+```
 
 #### Running auto-image
 After CB calibration is submitted, the pipeline can chain auto-image automatically. You can also run auto-image manually on an existing .ms path:
-`python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'`
+```
+python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'
+```
 
 ### Running ASC
 For ASC:
-`python auto-calibration.py --pipeline asc --url 'your-link-goes-here'`
+```
+python auto-calibration.py --pipeline asc --url 'your-link-goes-here'
+```
 
 If it is ASC on A-config, use --a-config. This adjusts L/S band resources to reduce memory-related crashes, but those bands can still fail on difficult datasets.
-`python auto-calibration.py --pipeline asc --url 'your-link-goes-here' --a-config`
+```
+python auto-calibration.py --pipeline asc --url 'your-link-goes-here' --a-config
+```
 
 If you already ran CB and now want ASC, point to the directory instead of giving a URL:
-`python auto-calibration.py --pipeline asc --asc-ms-path 'path-to-directory'`
+```
+python auto-calibration.py --pipeline asc --asc-ms-path 'path-to-directory'
+```
 
 ### Running CB-ASC
 You can chain CB then ASC on the same dataset. Supply an SDM-BDF source link (or other valid CB input):
-`python auto-calibration.py --pipeline cb-asc --url 'your-link-goes-here'`
+```
+python auto-calibration.py --pipeline cb-asc --url 'your-link-goes-here'
+```
 
 ## In Progress (Check status)
 This builds a working directory named:
@@ -106,10 +122,14 @@ This builds a working directory named:
 Depending on dataset size, downloads can take a while. Keep your terminal open until submission completes.
 
 Check running jobs with:
-`squeue -l --me`
+```
+squeue -l --me
+```
 
 For more detail:
-`sacct -u nm-XXXXX --format=NodeList,JobID,JobName%90,State,Start,End`
+```
+sacct -u nm-XXXXX --format=NodeList,JobID,JobName%90,State,Start,End
+```
 
 CB usually finishes within a day for most dataset sizes. ASC can take significantly longer depending on config and can run into memory issues for larger runs.
 
@@ -124,7 +144,9 @@ Inside a completed ASC.* directory, final outputs are placed under final_files, 
 
 ### Getting it off the Cluster
 To copy data off the cluster, first find your path on the cluster with `pwd`. Then from a local terminal (not logged into cluster), run something like:
-`scp -r nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_selfcal_cluster/ASCorCB.directory/final_files/ ~/where/ever/you/want`
+```
+scp -r nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_selfcal_cluster/ASCorCB.directory/final_files/ ~/where/ever/you/want
+```
 
 The first path is where the data is on the cluster, and the second path is where you want it locally.
 
@@ -132,4 +154,3 @@ The first path is where the data is on the cluster, and the second path is where
 Before/after runs, metadata snapshots and Slurm .out/.err artifacts are moved/grouped under logs. If something breaks or crashes, check those files first. The scripts are set up to throw useful setup/runtime errors, but they will not catch everything.
 
 If something breaks, run `git pull` to make sure you are on the latest version and try again.
-

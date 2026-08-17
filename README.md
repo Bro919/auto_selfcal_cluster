@@ -1,18 +1,19 @@
 # RUNNING INITIAL CALIBRATION OR AUTO SELF-CALIBRATION
-Many of the initial Auto-Selfcal scripts are forked from the work done by Jimmy Lynch (https://github.com/jlynch2195/auto_selfcal_cluster), and this repo also uses his auto-image-VLA (https://github.com/jlynch2195/auto-image-VLA) as a submodule. As Jimmy mentions, this also uses the auto_selfcal code developed by Patrick Sheehan (https://github.com/psheehan/auto_selfcal), so full credit goes to them for the basis of this project. Unlike Jimmy's original project, Patrick Sheehan's work is installed here as a submodule, so no extra installation step is needed. This project also makes use of the CASA calibration pipeline script supplied by NRAO.
+Many of the initial Auto-Selfcal scripts are forked from the work done by Jimmy Lynch (https://github.com/jlynch2195/auto_selfcal_cluster), and this repo also uses his auto-image-VLA (https://github.com/jlynch2195/auto-image-VLA) as a submodule. As Jimmy mentions in his REAdME, this also uses the auto_selfcal code developed by Patrick Sheehan and his team (https://github.com/psheehan/auto_selfcal), so full credit goes to them for the basis of the ASC pipeline of this project. Unlike Jimmy's original project, Patrick Sheehan's work is installed here as a submodule, so no extra installation step is needed. This project also makes use of the CASA calibration pipeline script supplied by NRAO.
 
 This repo is set up as an automation wrapper around their code, with the use case of the NRAO cluster and Talapas specifically in mind.
 
 My main use case has been on the NRAO cluster. Read through Jimmy's repo to get an idea of how to request access and make basic use of the cluster. He also comments on best use cases and how his scripts make use of Patrick Sheehan's work. I recommend fully reading Jimmy's README before this one since I skip many of the points he already covers. If this README has drifted from Jimmy's, his original one is still inside the ASC directory.
 
 ## Making use of auto-calibration
-The main wrapper you should use is auto-calibration.py in the top-level directory. It calls scripts/wrappers in the ASC, CB, and runtime directories. It handles downloading, setting up a working directory, preparing data, and submitting Slurm jobs.
+The main wrapper you should use is auto-calibration.py in the top-level directory. It calls scripts/wrappers in the ASC, CB, and runtime directories. It handles downloading, setting up a working directory, preparing data, and submitting Slurm jobs. It also deals with infering information about the dataset given to properly name the working directory.
 
 It can handle:
 - SDM-BDF datasets for initial calibration (CB) to create a .ms directory
 - Auto-SelfCal (ASC) on an existing .ms directory
 - Chaining CB directly into ASC
 - Standalone auto-image runs
+- Infers: Project Code, Object name and Observation data
 
 auto-calibration has a lot of flags and parameters for customization. Leave them at defaults unless you know exactly what you want to change.
 
@@ -55,7 +56,7 @@ You can run this using local data (covered below), but most commonly you will ru
 
 Make sure you are logged in with your NRAO account so you can access your data. Depending on pipeline:
 - CB expects SDM-BDF style source data
-- ASC expects a calibrated Measurement Set source (.ms)
+- ASC expects a calibrated Measurement Set source (.ms), that can also be created locally by running the CB pipeline
 
 NRAO will process your request and email you a link to the directory.
 
@@ -63,7 +64,7 @@ NRAO will process your request and email you a link to the directory.
 After requesting data and receiving the link, you can run auto-calibration.
 
 IMPORTANT:
-ASC can create many Slurm jobs, and A-config runs can take around 7-10 days. With common settings (split=both across multiple bands), you can see around 12 frequency jobs plus one cleanup job. Do not run multiple heavy ASC datasets at once unless you know your resource limits.
+ASC can create many Slurm jobs, and A-config runs can take around 7-10 days. With common settings (split=both across multiple bands), you can see around 12 frequency jobs plus one cleanup job. Do not run multiple heavy ASC datasets at once.
 
 CB typically submits two chained jobs (calibration, then auto-image) when auto-image is available, and it is usually done within a day.
 
@@ -151,6 +152,7 @@ scp -r nm-XXXXX@guest-login.aoc.nrao.edu:/lustre/aoc/observers/nm-XXXXX/auto_sel
 The first path is where the data is on the cluster, and the second path is where you want it locally.
 
 ## Logs
-Before/after runs, metadata snapshots and Slurm .out/.err artifacts are moved/grouped under logs. If something breaks or crashes, check those files first. The scripts are set up to throw useful setup/runtime errors, but they will not catch everything.
+Before/after runs, metadata snapshots and Slurm .out/.err artifacts are moved/grouped under logs. If something breaks or crashes, check those files first. The scripts are set up to throw useful setup/runtime errors, but they will not catch everything. You can use the flag -v when running to turn on verbose logging, if you need to get more out of the logs.
+You shouldn't need to look at any of the metadata logs as they are just generated as temp files for the metadata scrapers for naming the working directories.
 
-If something breaks, run `git pull` to make sure you are on the latest version and try again.
+If something breaks, it's also a good idea to run `git pull` to make sure you are on the latest version and try again.

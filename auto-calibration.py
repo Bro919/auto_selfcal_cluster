@@ -344,6 +344,85 @@ def resolve_source_url(args: argparse.Namespace) -> Optional[str]:
     return args.url
 
 
+def load_slurm_mail_config(config_path: Optional[Path] = None) -> Tuple[Optional[str], Optional[str]]:
+    default_path = Path(__file__).resolve().parent / "slurm-mail.conf"
+    config_file = Path(config_path) if config_path is not None else default_path
+
+    if not config_file.exists():
+        return None, None
+
+    try:
+        lines = config_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None, None
+
+    mail_type = None
+    mail_user = None
+    for raw_line in lines:
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = [part.strip() for part in line.split("=", 1)]
+        key_lower = key.lower()
+        if key_lower == "mail_type":
+            mail_type = value
+        elif key_lower == "mail_user":
+            mail_user = value
+
+    if not mail_type and not mail_user:
+        return None, None
+
+    allowed_types = {
+        "NONE",
+        "BEGIN",
+        "END",
+        "FAIL",
+        "REQUEUE",
+        "ALL",
+        "TIME_LIMIT",
+        "STAGE_OUT",
+    }
+
+    validated_mail_type = None
+    if mail_type:
+        tokens = [token.strip().upper() for token in re.split(r"[\s,]+", mail_type) if token.strip()]
+        if not tokens or any(token not in allowed_types for token in tokens):
+            print(
+                f"Warning: ignoring invalid Slurm mail_type in {config_file}; expected values like END,FAIL or FAIL",
+                file=sys.stderr,
+            )
+            return None, None
+        validated_mail_type = ",".join(tokens)
+
+    validated_mail_user = None
+    if mail_user:
+        email_pattern = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+        if not email_pattern.fullmatch(mail_user):
+            print(
+                f"Warning: ignoring invalid Slurm mail_user in {config_file}; expected a valid email address.",
+                file=sys.stderr,
+            )
+            return None, None
+        validated_mail_user = mail_user
+
+    return validated_mail_type, validated_mail_user
+
+
+def add_slurm_mail_args(command: list, mail_config: Optional[Tuple[Optional[str], Optional[str]]] = None) -> list:
+    if mail_config is None:
+        mail_config = load_slurm_mail_config()
+    mail_type, mail_user = mail_config or (None, None)
+    if not mail_type and not mail_user:
+        return command
+
+    command = list(command)
+    if mail_type:
+        command.extend(["--mail-type", mail_type])
+    if mail_user:
+        command.extend(["--mail-user", mail_user])
+    return command
+
+
 def validate_url_for_pipeline(url: Optional[str], pipeline: str, quiet: bool = False) -> None:
     if not url or not is_remote_url(url):
         return
@@ -806,7 +885,7 @@ def submit_post_job_cleanup(args: argparse.Namespace, after_job_id: str, jobname
         ]
     )
 
-    submit_cmd = [
+    submit_cmd = add_slurm_mail_args([
         "sbatch",
         "--dependency",
         f"afterany:{after_job_id}",
@@ -828,7 +907,7 @@ def submit_post_job_cleanup(args: argparse.Namespace, after_job_id: str, jobname
         str(slurm_logs_dir / "log_cleanup.%j.err"),
         "--wrap",
         wrap_cmd,
-    ]
+    ])
 
     result = subprocess.run(
         submit_cmd,
@@ -900,7 +979,7 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
                 "Generate it via CB prep first, or run direct mode without --auto-image-submit."
             )
 
-        cmd = ["sbatch", str(submit_script)]
+        cmd = add_slurm_mail_args(["sbatch", str(submit_script)])
         if args.dry_run:
             print("Auto-image dry run enabled; the following command would be executed:")
             print(" ".join(cmd))
@@ -1144,12 +1223,12 @@ def submit_dependent_asc_job(args: argparse.Namespace, cb_workdir: Path, cb_fina
     launcher_text = "\n".join(header_lines + ["", "set -euo pipefail", command_str, ""])
     launcher_path.write_text(launcher_text, encoding="utf-8")
 
-    submit_cmd = [
+    submit_cmd = add_slurm_mail_args([
         "sbatch",
         "--dependency",
         f"afterok:{cb_final_job_id}",
         str(launcher_path),
-    ]
+    ])
     result = subprocess.run(
         submit_cmd,
         check=True,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import re
 import shlex
 import sys
 from pathlib import Path
@@ -26,6 +27,51 @@ SBATCH_MAIL_USER = None
 SBATCH_EXPORT_ALL = True
 MODULE_LOAD = None
 USE_EXECFILE = False
+
+
+def load_slurm_mail_config(config_path=None):
+    config_file = Path(config_path) if config_path is not None else Path(__file__).resolve().parents[1] / "slurm-mail.conf"
+    if not config_file.exists():
+        return None, None
+
+    try:
+        lines = config_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None, None
+
+    mail_type = None
+    mail_user = None
+    for raw_line in lines:
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = [part.strip() for part in line.split("=", 1)]
+        key_lower = key.lower()
+        if key_lower == "mail_type":
+            mail_type = value
+        elif key_lower == "mail_user":
+            mail_user = value
+
+    if not mail_type and not mail_user:
+        return None, None
+
+    allowed_types = {"NONE", "BEGIN", "END", "FAIL", "REQUEUE", "ALL", "TIME_LIMIT", "STAGE_OUT"}
+    if mail_type:
+        tokens = [token.strip().upper() for token in re.split(r"[\s,]+", mail_type) if token.strip()]
+        if not tokens or any(token not in allowed_types for token in tokens):
+            print(f"Warning: ignoring invalid Slurm mail_type in {config_file}; expected values like END,FAIL or FAIL", file=sys.stderr)
+            return None, None
+        mail_type = ",".join(tokens)
+    if mail_user:
+        email_pattern = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+        if not email_pattern.fullmatch(mail_user):
+            print(f"Warning: ignoring invalid Slurm mail_user in {config_file}; expected a valid email address.", file=sys.stderr)
+            return None, None
+
+    return mail_type, mail_user
+
+
+SBATCH_MAIL_TYPE, SBATCH_MAIL_USER = load_slurm_mail_config()
 
 ENABLE_AUTO_IMAGE_FOLLOWUP = True
 AUTO_IMAGE_DIR = "auto-image-VLA"

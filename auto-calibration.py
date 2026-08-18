@@ -855,14 +855,11 @@ def archive_old_slurm_artifacts(script_dir: Path, quiet: bool = False) -> int:
     return moved_count
 
 
-def build_cleanup_jobname(args: argparse.Namespace) -> str:
-    parts = [
-        "cb-asc",
-        args.project_code or "unknown_project",
-        args.object_name or "unknown_object",
-        args.observation_date or "unknown_date",
-    ]
-    return ".".join(parts)
+def build_cleanup_jobname(cb_workdir: Path) -> str:
+    workdir_name = cb_workdir.name.strip()
+    if workdir_name:
+        return workdir_name
+    return "cb-asc.unknown"
 
 
 def submit_post_job_cleanup(args: argparse.Namespace, after_job_id: str, jobname: str) -> str:
@@ -1403,7 +1400,7 @@ def main() -> None:
                     f"Submitted dependent ASC job {asc_job_id} "
                     f"(afterok:{cb_final_job_id})."
                 )
-                cleanup_jobname = build_cleanup_jobname(args)
+                cleanup_jobname = build_cleanup_jobname(cb_workdir)
                 try:
                     cleanup_job_id = submit_post_job_cleanup(args, asc_job_id, cleanup_jobname)
                 except Exception as exc:

@@ -48,6 +48,9 @@ git submodule update --init --recursive
 
 You may need to `cd` into the repo before running the submodule install.
 
+#### Email Notifications
+It also has the capability of email notifications, so that you can be notified when for exmaple a job starts, ends or fails. In the main directory you should find `slurm-mail.conf`. You can edit it using nano (Jimmy has a good breakdown of how to use it) setting the mail type and the specific address that you want the mail to go to. You can set it to only give you when it completes and when it fails as it is set my default, or you can add more such as for when it starts a job. No worries if you don't want to set this up it'll just skip it when running if it doesn't find anything.
+
 ## Contents
 As mentioned above, you should mainly use the auto-calibration wrapper. The main wrapper scripts are in runtime, while CB/ASC specific scripts are in their respective directories. The logs directory collects Slurm and metadata outputs to keep the main directory cleaner, and submodules are stored in repo.
 
@@ -135,7 +138,7 @@ sacct -u nm-XXXXX --format=NodeList,JobID,JobName%90,State,Start,End
 CB usually finishes within a day for most dataset sizes. ASC can take significantly longer depending on config and can run into memory issues for larger runs.
 
 ## Completed
-You will not receive a completion notification by default, so check job status to confirm completion or failure.
+You will not receive a completion notification by default, so check job status to confirm completion or failure. If you setup the slurm-mail properly you should receive an email at the address you specified depending on the mail type you set.
 
 #### CB
 Inside a completed CB.* directory, calibration should produce the .ms output. Auto-image outputs are produced by the follow-up auto-image-VLA job (when enabled) and include frequency images and fit result CSV outputs.

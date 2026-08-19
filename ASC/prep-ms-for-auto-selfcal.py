@@ -1,10 +1,12 @@
 import glob
 import numpy as np
 import os
+import re
 import pandas as pd
 import shutil
 import sys
 import time
+from pathlib import Path
 
 from datetime import datetime
 
@@ -17,6 +19,56 @@ single_band = "EVLA_C"
 use_single_freq = False
 single_freq = 9
 A_config = False  # Set to True to use special resources for L band
+
+
+def load_slurm_mail_config():
+    config_file = Path(__file__).resolve().parents[1] / "slurm-mail.conf"
+    if not config_file.exists():
+        return None, None
+
+    try:
+        lines = config_file.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None, None
+
+    mail_type = None
+    mail_user = None
+    for raw_line in lines:
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = [part.strip() for part in line.split("=", 1)]
+        if key.lower() == "mail_type":
+            mail_type = value
+        elif key.lower() == "mail_user":
+            mail_user = value
+
+    if not mail_type and not mail_user:
+        return None, None
+
+    allowed_types = {"NONE", "BEGIN", "END", "FAIL", "REQUEUE", "ALL", "TIME_LIMIT", "STAGE_OUT"}
+    if mail_type:
+        tokens = [token.strip().upper() for token in re.split(r"[\s,]+", mail_type) if token.strip()]
+        if not tokens or any(token not in allowed_types for token in tokens):
+            print(f"Warning: ignoring invalid Slurm mail_type in {config_file}", file=sys.stderr)
+            return None, None
+        mail_type = ",".join(tokens)
+
+    if mail_user:
+        email_pattern = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+        if not email_pattern.fullmatch(mail_user):
+            print(f"Warning: ignoring invalid Slurm mail_user in {config_file}", file=sys.stderr)
+            return None, None
+
+    return mail_type, mail_user
+
+
+SBATCH_MAIL_TYPE, SBATCH_MAIL_USER = load_slurm_mail_config()
+SBATCH_MAIL_DIRECTIVES = ""
+if SBATCH_MAIL_TYPE:
+    SBATCH_MAIL_DIRECTIVES += f"#SBATCH --mail-type={SBATCH_MAIL_TYPE}\n"
+if SBATCH_MAIL_USER:
+    SBATCH_MAIL_DIRECTIVES += f"#SBATCH --mail-user={SBATCH_MAIL_USER}\n"
 
 # Function to scrape a listfile for information needed for tclean ================================================================
 # Inputs:
@@ -697,6 +749,7 @@ for i in range(len(split_ms_directories)):
 #SBATCH --mem={mem}                           # Memory for the whole job
 #SBATCH --nodes=1                             # Request 1 node
 #SBATCH --ntasks-per-node={cores}             # Request {cores} cores
+{SBATCH_MAIL_DIRECTIVES}
 
 echo "about to run auto_selfcal.py"
 xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c auto_selfcal.py
@@ -723,6 +776,7 @@ cleanup_job_content = f"""#!/bin/bash
 #SBATCH --mem=64G                             # Memory for cleanup
 #SBATCH --nodes=1                             # Request 1 node
 #SBATCH --ntasks-per-node=2                   # Request 2 cores
+{SBATCH_MAIL_DIRECTIVES}
 
 echo "about to run clean_up_post_selfcal.py"
 xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c clean_up_post_selfcal.py

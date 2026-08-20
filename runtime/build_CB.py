@@ -390,6 +390,7 @@ def parse_args() -> argparse.Namespace:
         help="Optional URL/path argument, either raw value or url=<value> after positional args",
     )
     parser.add_argument("--url", help="URL or local path to tar file/directory")
+    parser.add_argument("--local-dataset", help="Local extracted SDM-BDF dataset root")
     parser.add_argument("--cb", type=str, default="CB", help="Path to the CB template directory")
     parser.add_argument(
         "--auto-image-vla",
@@ -582,13 +583,13 @@ def main() -> None:
         missing.append("object_name")
     if not args.observation_date:
         missing.append("observation_date")
-    if not args.url:
-        missing.append("url")
+    if not args.url and not args.local_dataset:
+        missing.append("url or local-dataset")
     if missing:
         sys.exit(
             "Usage error: missing required values: "
             + ", ".join(missing)
-            + ". Provide project_code object_name observation_date URL/PATH, or use named inputs (e.g., url=...)."
+            + ". Provide project_code object_name observation_date and either URL/PATH or --local-dataset."
         )
 
     workdir_name = f"CB.{args.project_code}.{args.object_name}.{args.observation_date}"
@@ -611,10 +612,15 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(dir=str(temp_root), prefix="build_cb_") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
-        input_path = Path(args.url).expanduser()
+        input_path = Path(args.local_dataset or args.url).expanduser()
 
         try:
-            if input_path.exists():
+            if args.local_dataset:
+                if not input_path.is_dir():
+                    raise RuntimeError(f"Local dataset path is not a directory: {input_path}")
+                logger.info("Using local SDM-BDF dataset: %s", input_path)
+                downloaded_dir = input_path
+            elif input_path.exists():
                 logger.info("Using local input path: %s", input_path)
                 downloaded_dir = resolve_observation_dir_from_local_input(input_path, temp_dir)
             else:

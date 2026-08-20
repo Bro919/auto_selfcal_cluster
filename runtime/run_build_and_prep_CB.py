@@ -81,6 +81,7 @@ def parse_args() -> argparse.Namespace:
         help="Optional URL/path argument, either raw value or url=<value> after positional args",
     )
     parser.add_argument("--url", help="URL or local path to source dataset")
+    parser.add_argument("--local-dataset", help="Local extracted SDM-BDF dataset root")
     parser.add_argument(
         "--source",
         help="Alias for --url; local path or URL used for metadata inference when needed.",
@@ -470,7 +471,7 @@ def run_build(
         str(build_script),
         project_code,
         object_name,
-        url,
+        args.local_dataset or url,
         observation_date,
         "--cb",
         args.cb,
@@ -481,6 +482,8 @@ def run_build(
         "--auto-image-split",
         args.auto_image_split,
     ]
+    if args.local_dataset:
+        command.extend(["--local-dataset", args.local_dataset])
     if args.temp_dir:
         command.extend(["--temp-dir", args.temp_dir])
     if args.verbose:
@@ -523,14 +526,18 @@ def main() -> None:
 
     script_dir = runtime_dir()
     project_code, object_name, url, observation_date = collect_resolved_inputs(args)
+    source_for_metadata = args.local_dataset or url
 
-    if url:
+    if args.local_dataset:
+        args.local_dataset = normalize_source_value(args.local_dataset)
+        source_for_metadata = args.local_dataset
+    elif url:
         url = normalize_source_value(url)
         args.url = url
         args.source = url
 
     if not project_code or not object_name or not observation_date:
-        source_value = args.source or url
+        source_value = source_for_metadata or args.source or url
         if not source_value:
             raise ValueError("A source path/URL is required when metadata values are not supplied explicitly.")
 
@@ -546,7 +553,7 @@ def main() -> None:
     if observation_date == "unknown":
         observation_date = None
 
-    if not project_code or not object_name or not observation_date or not url:
+    if not project_code or not object_name or not observation_date or not (url or args.local_dataset):
         raise ValueError(
             "Could not resolve project_code, object_name, observation_date, and url. "
             "Supply them explicitly or point --source at a local dataset."
@@ -558,11 +565,11 @@ def main() -> None:
         object_name,
         observation_date,
     )
-    logger.debug("Resolved source URL/path: %s", url)
+    logger.debug("Resolved source URL/path: %s", args.local_dataset or url)
 
     workdir = compute_workdir(str(project_code), str(object_name), str(observation_date))
 
-    run_build(script_dir, str(project_code), str(object_name), str(url), str(observation_date), args, logger)
+    run_build(script_dir, str(project_code), str(object_name), str(url or ""), str(observation_date), args, logger)
 
     if args.dry_run:
         logger.info("Dry run complete; prep and submit were not executed")

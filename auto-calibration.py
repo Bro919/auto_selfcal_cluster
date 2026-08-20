@@ -39,6 +39,10 @@ def parse_args():
     )
     parser.add_argument("--observation-date", help="Observation date, e.g. 2023-07-22")
     parser.add_argument("--url", help="Source URL/path; pipeline-specific behavior is inferred from --pipeline")
+    parser.add_argument(
+        "--cb-local-dataset",
+        help="Local extracted SDM-BDF dataset root for CB mode (use instead of --url)",
+    )
     parser.add_argument("--cb-workdir", help="Existing CB working directory to use instead of running build/prep")
     parser.add_argument(
         "--asc-ms-path",
@@ -1075,8 +1079,9 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
         return cb_workdir, None
 
     cb_url = resolve_source_url(args)
-    if not cb_url:
-        sys.exit("Error: a source URL/path is required for CB mode (use --url).")
+    cb_local_dataset = args.cb_local_dataset
+    if not cb_url and not cb_local_dataset:
+        sys.exit("Error: provide --url for a remote/archive CB source or --cb-local-dataset for a local SDM-BDF.")
 
     cb_workdir = None
     if args.project_code and args.object_name and args.observation_date:
@@ -1089,7 +1094,10 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
         cmd.append(f"object_name={args.object_name}")
     if args.observation_date:
         cmd.append(f"observation_date={args.observation_date}")
-    cmd.extend(["--url", cb_url])
+    if cb_local_dataset:
+        cmd.extend(["--local-dataset", cb_local_dataset])
+    else:
+        cmd.extend(["--url", cb_url])
     cmd.extend(["--cb", args.cb_template])
     cmd.extend(["--auto-image-vla", args.cb_auto_image_vla])
     if args.verbose:

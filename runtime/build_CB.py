@@ -319,8 +319,6 @@ def compute_expected_ms_path(
     object_name: str,
     observation_date: str,
 ) -> Path:
-    if observation_subdir_name and observation_subdir_name != ".":
-        return workdir_path / f"{observation_subdir_name}.ms"
     return workdir_path / f"{project_code}.{object_name}.{observation_date}.ms"
 
 

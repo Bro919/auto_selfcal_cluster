@@ -208,6 +208,31 @@ def build_casa_install_pandas_command(casa_executable):
     return f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
 
 
+def build_final_ms_rename_command(target_name):
+    target = shlex.quote(target_name)
+    return "\n".join(
+        [
+            f"target_ms={target}",
+            'source_ms=""',
+            'for candidate in ./*.ms; do',
+            '    if [ -d "$candidate" ] && [ "$candidate" != "./$target_ms" ]; then',
+            '        if [ -n "$source_ms" ]; then',
+            '            echo "Error: multiple final .ms directories found; refusing to rename automatically." >&2',
+            '            exit 1',
+            '        fi',
+            '        source_ms="$candidate"',
+            '    fi',
+            'done',
+            'if [ -z "$source_ms" ]; then',
+            '    echo "Error: no final .ms directory found to rename." >&2',
+            '    exit 1',
+            'fi',
+            'mv "$source_ms" "$target_ms"',
+            'echo "Renamed final measurement set: $source_ms -> $target_ms"',
+        ]
+    )
+
+
 def write_batch_list(batch_file, paths, append=False):
     mode = "a" if append else "w"
     batch_path = Path(batch_file).expanduser().resolve()
@@ -238,6 +263,12 @@ calibration_command = build_casa_command(
     casa_script=CASA_SCRIPT,
     use_execfile=USE_EXECFILE,
 )
+workdir_name = workdir.name
+if workdir_name.startswith("CB."):
+    final_ms_name = f"{workdir_name[3:]}.ms"
+else:
+    final_ms_name = f"{workdir_name}.ms"
+final_ms_rename_command = build_final_ms_rename_command(final_ms_name)
 
 script_content = build_slurm_script(
     workdir=workdir,
@@ -255,7 +286,7 @@ script_content = build_slurm_script(
     mail_user=SBATCH_MAIL_USER,
     export_all=SBATCH_EXPORT_ALL,
     module_load=MODULE_LOAD,
-    commands=[calibration_command],
+    commands=[calibration_command, final_ms_rename_command],
     start_message="Starting CASA non-interactive calibration job",
     complete_message="CASA calibration job complete",
 )

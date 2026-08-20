@@ -4,6 +4,7 @@ import argparse
 import codecs
 from collections import deque
 from datetime import datetime
+import json
 import os
 import re
 import shlex
@@ -598,12 +599,47 @@ def write_auto_image_config(
     print(f"Wrote auto-image config: {config_target}")
 
 
-def derive_source_name_for_auto_image(args: argparse.Namespace, ms_path: Path) -> str:
+def read_auto_image_source_name(args: argparse.Namespace, script_dir: Path, ms_path: Path) -> str:
     if args.auto_image_source_name:
         return args.auto_image_source_name
     if args.asc_source_name:
         return args.asc_source_name
-    return ms_path.stem
+
+    metadata_script = script_dir / "runtime" / "metadata-scraper-ASC.py"
+    if not metadata_script.exists():
+        sys.exit(f"Error: ASC metadata scraper not found: {metadata_script}")
+
+    command = [
+        sys.executable,
+        str(metadata_script),
+        str(ms_path),
+        "--output-format",
+        "json",
+    ]
+    if args.project_code:
+        command.extend(["--project-code", args.project_code])
+
+    result = subprocess.run(
+        command,
+        cwd=script_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or f"return code {result.returncode}"
+        sys.exit(f"Error: ASC metadata scraper could not resolve the auto-image source: {detail}")
+
+    try:
+        metadata = json.loads(result.stdout)
+    except ValueError as exc:
+        sys.exit(f"Error: invalid output from ASC metadata scraper: {exc}")
+
+    source_name = metadata.get("object_name")
+    if not source_name:
+        sys.exit("Error: ASC metadata scraper returned no object_name for the measurement set.")
+    return source_name
 
 
 def bootstrap_auto_image_workdir(
@@ -624,7 +660,7 @@ def bootstrap_auto_image_workdir(
     write_auto_image_config(
         auto_image_vla_dst,
         ms_path,
-        derive_source_name_for_auto_image(args, ms_path),
+        read_auto_image_source_name(args, script_dir, ms_path),
         args.auto_image_size,
         args.auto_image_split,
     )

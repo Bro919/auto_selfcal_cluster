@@ -776,7 +776,6 @@ cleanup_job_content = f"""#!/bin/bash
 #SBATCH --mem=64G                             # Memory for cleanup
 #SBATCH --nodes=1                             # Request 1 node
 #SBATCH --ntasks-per-node=2                   # Request 2 cores
-{SBATCH_MAIL_DIRECTIVES}
 
 echo "about to run clean_up_post_selfcal.py"
 xvfb-run -d /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/mpicasa /home/casa/packages/RHEL8/release/casa-6.6.4-34-py3.8.el8/bin/casa --nogui -c clean_up_post_selfcal.py

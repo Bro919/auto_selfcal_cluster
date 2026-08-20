@@ -1097,7 +1097,7 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
     if cb_local_dataset:
         cmd.extend(["--local-dataset", cb_local_dataset])
     else:
-        cmd.extend(["--url", cb_url])
+        cmd.extend(["--url", cb_url or ""])
     cmd.extend(["--cb", args.cb_template])
     cmd.extend(["--auto-image-vla", args.cb_auto_image_vla])
     if args.verbose:

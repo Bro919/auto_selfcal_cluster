@@ -595,7 +595,14 @@ def main() -> None:
     workdir_name = f"CB.{args.project_code}.{args.object_name}.{args.observation_date}"
     workdir_path = Path(workdir_name)
     if workdir_path.exists():
-        sys.exit(f"Error: Working directory {workdir_path} already exists.")
+        if workdir_path.is_dir() and not any(workdir_path.iterdir()):
+            workdir_path.rmdir()
+            print(f"Removed empty incomplete working directory: {workdir_path}")
+        else:
+            sys.exit(
+                f"Error: Working directory {workdir_path} already exists and is not empty. "
+                "Use --cb-workdir/--skip-cb for an existing run, or remove/archive it before retrying."
+            )
 
     workdir_path.mkdir(parents=True, exist_ok=False)
     print(f"Created working directory: {workdir_path}")

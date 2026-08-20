@@ -251,6 +251,13 @@ def is_remote_url(value: str) -> bool:
     return parsed.scheme in {"http", "https"}
 
 
+def normalize_source_value(value: str) -> str:
+    """Resolve local sources before child processes change their working directory."""
+    if is_remote_url(value):
+        return value
+    return str(Path(value).expanduser().resolve())
+
+
 def parse_mjd_to_date(value: str) -> Optional[str]:
     try:
         mjd = float(value)
@@ -516,6 +523,11 @@ def main() -> None:
 
     script_dir = runtime_dir()
     project_code, object_name, url, observation_date = collect_resolved_inputs(args)
+
+    if url:
+        url = normalize_source_value(url)
+        args.url = url
+        args.source = url
 
     if not project_code or not object_name or not observation_date:
         source_value = args.source or url

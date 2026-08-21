@@ -72,14 +72,9 @@ def parse_args() -> argparse.Namespace:
             "and optionally submit the job via sbatch."
         )
     )
-    parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
-    parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
-    parser.add_argument("observation_date", nargs="?", help="Observation date, e.g. 2023-07-22")
-    parser.add_argument(
-        "url_arg",
-        nargs="?",
-        help="Optional URL/path argument, either raw value or url=<value> after positional args",
-    )
+    parser.add_argument("--project-code", dest="project_code", help="Project code, e.g. 23A-241")
+    parser.add_argument("--object-name", dest="object_name", help="Object name, e.g. AT2019ehz")
+    parser.add_argument("--observation-date", dest="observation_date", help="Observation date, e.g. 2023-07-22")
     parser.add_argument("--url", help="URL or local path to source dataset")
     parser.add_argument("--local-dataset", help="Local extracted SDM-BDF dataset root")
     parser.add_argument(
@@ -140,92 +135,7 @@ def compute_workdir(project_code: str, object_name: str, observation_date: str) 
     return project_root_dir() / f"CB.{project_code}.{object_name}.{observation_date}"
 
 
-def parse_named_inputs(inputs: List[str]) -> Tuple[Dict[str, str], List[str]]:
-    named_inputs: Dict[str, str] = {}
-    positional_inputs: List[str] = []
-
-    for token in inputs:
-        if "=" in token and not token.startswith("--"):
-            key, value = token.split("=", 1)
-            named_inputs[key.strip()] = value.strip()
-        else:
-            positional_inputs.append(token)
-
-    return named_inputs, positional_inputs
-
-
-def _looks_like_date(value: Optional[str]) -> bool:
-    if not value:
-        return False
-    if re.match(r"^\d{4}-\d{2}-\d{2}$", str(value)):
-        return True
-    return bool(re.match(r"^\d{5,6}(?:\.\d+)?$", str(value)))
-
-
 def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
-    named_inputs, _ = parse_named_inputs(sys.argv[1:])
-
-    if named_inputs.get("project_code") and not args.project_code:
-        args.project_code = named_inputs["project_code"]
-    if named_inputs.get("object_name") and not args.object_name:
-        args.object_name = named_inputs["object_name"]
-    if named_inputs.get("observation_date") and not args.observation_date:
-        args.observation_date = named_inputs["observation_date"]
-    if named_inputs.get("url") and not args.url:
-        args.url = named_inputs["url"]
-    if named_inputs.get("source") and not args.source:
-        args.source = named_inputs["source"]
-
-    for attr in ("project_code", "object_name", "observation_date"):
-        value = getattr(args, attr)
-        if value and isinstance(value, str) and value.startswith("url="):
-            extracted_url = value.split("=", 1)[1].strip()
-            if extracted_url and not args.url:
-                args.url = extracted_url
-            setattr(args, attr, None)
-
-    # Handle split form: "url= /path/or/url".
-    if args.url in (None, ""):
-        saw_url_marker = False
-        for attr in ("project_code", "object_name", "observation_date", "url_arg"):
-            value = getattr(args, attr, None)
-            if not value or not isinstance(value, str):
-                continue
-            if value.lower() == "url=":
-                saw_url_marker = True
-                setattr(args, attr, None)
-                continue
-            if saw_url_marker:
-                args.url = value
-                setattr(args, attr, None)
-                break
-
-    # Backward compatibility: old order was project object url observation_date.
-    if args.url in (None, "") and args.observation_date and args.url_arg:
-        if not _looks_like_date(args.observation_date) and _looks_like_date(args.url_arg):
-            args.url = args.observation_date
-            args.observation_date = args.url_arg
-            args.url_arg = None
-
-    if not args.url and args.url_arg:
-        if str(args.url_arg).startswith("url="):
-            args.url = str(args.url_arg).split("=", 1)[1]
-        else:
-            args.url = args.url_arg
-
-    # Backward compatibility with old single-source positional form.
-    if (
-        args.project_code
-        and not args.object_name
-        and not args.observation_date
-        and not args.url_arg
-        and not args.url
-        and not named_inputs.get("project_code")
-    ):
-        args.url = args.project_code
-        args.source = args.source or args.project_code
-        args.project_code = None
-
     if args.source and not args.url:
         args.url = args.source
     if args.url and not args.source:
@@ -236,10 +146,7 @@ def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
 
 def collect_resolved_inputs(
     args: argparse.Namespace,
-    named_inputs: Optional[Dict[str, str]] = None,
-    positional_inputs: Optional[List[str]] = None,
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    del named_inputs, positional_inputs
     project_code = args.project_code
     object_name = args.object_name
     observation_date = args.observation_date

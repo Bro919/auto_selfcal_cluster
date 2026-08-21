@@ -77,15 +77,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build ASC workdir, patch prep script, and optionally run CASA non-interactively."
     )
-    parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
-    parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
-    parser.add_argument("observation_date", nargs="?", help="Observation date, e.g. 2023-07-22")
-    parser.add_argument(
-        "url_arg",
-        nargs="?",
-        help="Optional URL argument, either raw URL or url=<value> after positional args",
-    )
-
+    parser.add_argument("--project-code", dest="project_code", help="Project code, e.g. 23A-241")
+    parser.add_argument("--object-name", dest="object_name", help="Object name, e.g. AT2019ehz")
+    parser.add_argument("--observation-date", dest="observation_date", help="Observation date, e.g. 2023-07-22")
     parser.add_argument("--url", help="URL to download from")
     parser.add_argument(
         "--ms-path",
@@ -148,57 +142,7 @@ def compute_workdir(project_code: str, object_name: str, observation_date: str) 
     return project_root_dir() / f"ASC.{project_code}.{object_name}.{observation_date}"
 
 
-def parse_named_inputs(inputs) -> Tuple[Dict[str, str], list]:
-    named_inputs: Dict[str, str] = {}
-    positional_inputs = []
-    for token in inputs:
-        if "=" in token and not token.startswith("--"):
-            key, value = token.split("=", 1)
-            named_inputs[key.strip()] = value.strip()
-        else:
-            positional_inputs.append(token)
-    return named_inputs, positional_inputs
-
-
 def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
-    named_inputs, _ = parse_named_inputs(sys.argv[1:])
-    if named_inputs.get("project_code"):
-        args.project_code = named_inputs["project_code"]
-    if named_inputs.get("object_name"):
-        args.object_name = named_inputs["object_name"]
-    if named_inputs.get("observation_date"):
-        args.observation_date = named_inputs["observation_date"]
-    if named_inputs.get("url"):
-        args.url = named_inputs["url"]
-    if named_inputs.get("source") and not args.ms_path:
-        args.source = named_inputs["source"]
-
-    for attr in ("project_code", "object_name", "observation_date"):
-        value = getattr(args, attr)
-        if value and isinstance(value, str) and value.startswith("url="):
-            extracted_url = value.split("=", 1)[1].strip()
-            if extracted_url and not args.url:
-                args.url = extracted_url
-            setattr(args, attr, None)
-
-    # Handle split form: "url= https://..." where url= occupies one positional slot.
-    if args.url in (None, ""):
-        positional_url = None
-        for attr in ("project_code", "object_name", "observation_date", "url_arg"):
-            value = getattr(args, attr, None)
-            if value and isinstance(value, str) and value.lower() == "url=":
-                setattr(args, attr, None)
-                continue
-            if value and isinstance(value, str) and value.startswith(("http://", "https://")):
-                positional_url = value
-                setattr(args, attr, None)
-                break
-        if positional_url:
-            args.url = positional_url
-
-    if not args.url and args.url_arg:
-        args.url = args.url_arg.split("=", 1)[1] if args.url_arg.startswith("url=") else args.url_arg
-
     return args
 
 
@@ -1143,7 +1087,7 @@ def main() -> None:
 
     if not args.url:
         sys.exit(
-            "Usage error: URL must be provided with --url or positional url=<value> or raw URL argument."
+            "Usage error: URL must be provided with --url."
         )
 
     try:

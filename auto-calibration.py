@@ -23,13 +23,8 @@ def parse_args():
             "Run CB, ASC, or CB->ASC calibration workflows from one entrypoint."
         )
     )
-    parser.add_argument("project_code", nargs="?", help="Project code, e.g. 23A-241")
-    parser.add_argument("object_name", nargs="?", help="Object name, e.g. AT2019ehz")
-    parser.add_argument(
-        "observation_date_pos",
-        nargs="?",
-        help="Optional positional observation date for backward-compatible invocation forms",
-    )
+    parser.add_argument("--project-code", dest="project_code", help="Project code, e.g. 23A-241")
+    parser.add_argument("--object-name", dest="object_name", help="Object name, e.g. AT2019ehz")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output and command tracing")
     parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output to essential status/error messages")
     parser.add_argument(
@@ -220,47 +215,48 @@ def parse_args():
         help="Dry-run the combined workflow and print CB/ASC commands instead of executing them.",
     )
     parser.set_defaults(cb_submit=True)
-    return parser.parse_args()
+    return parser.parse_args(normalize_boolean_flag_values(sys.argv[1:]))
 
 
-def parse_named_inputs(inputs):
-    named_inputs = {}
-    positional_inputs = []
-    for token in inputs:
-        if "=" in token and not token.startswith("--"):
-            key, value = token.split("=", 1)
-            named_inputs[key.strip()] = value.strip()
-        else:
-            positional_inputs.append(token)
-    return named_inputs, positional_inputs
+def normalize_boolean_flag_values(inputs):
+    """Accept optional True/False values for legacy boolean flag invocations."""
+    boolean_flags = {
+        "--verbose": True,
+        "--quiet": True,
+        "--cb-skip-submit": False,
+        "--cb-submit": True,
+        "--cb-asc-wait-for-cb": True,
+        "--auto-image-submit": True,
+        "--asc-use-single-band": True,
+        "--asc-use-single-freq": True,
+        "--a-config": True,
+        "--asc-a-config": True,
+        "--asc-no-casa": True,
+        "--asc-skip-submit": True,
+        "--asc-dry-run": True,
+        "--dry-run": True,
+    }
+    normalized = []
+    index = 0
+    while index < len(inputs):
+        token = inputs[index]
+        flag_value = boolean_flags.get(token)
+        if flag_value is not None:
+            if index + 1 < len(inputs) and inputs[index + 1].strip().lower() in {"true", "false"}:
+                requested_value = inputs[index + 1].strip().lower() == "true"
+                if requested_value == flag_value:
+                    normalized.append(token)
+                index += 2
+                continue
+            normalized.append(token)
+            index += 1
+            continue
+        normalized.append(token)
+        index += 1
+    return normalized
 
 
 def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
-    named_inputs, _ = parse_named_inputs(sys.argv[1:])
-
-    if args.observation_date_pos and not args.observation_date:
-        args.observation_date = args.observation_date_pos
-
-    if named_inputs.get("project_code"):
-        args.project_code = named_inputs["project_code"]
-    if named_inputs.get("object_name"):
-        args.object_name = named_inputs["object_name"]
-    if named_inputs.get("observation_date"):
-        args.observation_date = named_inputs["observation_date"]
-    if named_inputs.get("url"):
-        args.url = named_inputs["url"]
-
-    # Accept split form: "url= https://..."
-    if not args.url:
-        saw_url_marker = False
-        for token in sys.argv[1:]:
-            if token.lower() == "url=":
-                saw_url_marker = True
-                continue
-            if saw_url_marker:
-                args.url = token
-                break
-
     # Backward compatibility for older parser variants that used --a-config -> a_config.
     if not hasattr(args, "asc_a_config"):
         args.asc_a_config = bool(getattr(args, "a_config", False))
@@ -1125,11 +1121,11 @@ def run_cb_workflow(args: argparse.Namespace) -> Tuple[Path, Optional[str]]:
 
     cmd = [sys.executable, str(cb_script)]
     if args.project_code:
-        cmd.append(f"project_code={args.project_code}")
+        cmd.extend(["--project-code", args.project_code])
     if args.object_name:
-        cmd.append(f"object_name={args.object_name}")
+        cmd.extend(["--object-name", args.object_name])
     if args.observation_date:
-        cmd.append(f"observation_date={args.observation_date}")
+        cmd.extend(["--observation-date", args.observation_date])
     if cb_local_dataset:
         cmd.extend(["--local-dataset", cb_local_dataset])
     else:
@@ -1195,11 +1191,11 @@ def build_asc_local_command(args: argparse.Namespace, ms_path: Path, script_dir:
 
     cmd = [sys.executable, str(asc_script)]
     if args.project_code:
-        cmd.append(f"project_code={args.project_code}")
+        cmd.extend(["--project-code", args.project_code])
     if args.object_name:
-        cmd.append(f"object_name={args.object_name}")
+        cmd.extend(["--object-name", args.object_name])
     if args.observation_date:
-        cmd.append(f"observation_date={args.observation_date}")
+        cmd.extend(["--observation-date", args.observation_date])
     cmd.extend(["--ms-path", str(ms_path.resolve())])
     cmd.extend(["--asc", str(asc_template)])
     if args.verbose:
@@ -1295,11 +1291,11 @@ def run_asc_remote_workflow(args: argparse.Namespace, source_url: str) -> None:
 
     cmd = [sys.executable, str(asc_script)]
     if args.project_code:
-        cmd.append(f"project_code={args.project_code}")
+        cmd.extend(["--project-code", args.project_code])
     if args.object_name:
-        cmd.append(f"object_name={args.object_name}")
+        cmd.extend(["--object-name", args.object_name])
     if args.observation_date:
-        cmd.append(f"observation_date={args.observation_date}")
+        cmd.extend(["--observation-date", args.observation_date])
     cmd.extend(["--url", source_url])
     cmd.extend(["--asc", args.asc_template])
     if args.verbose:

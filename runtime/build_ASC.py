@@ -482,68 +482,6 @@ def patch_clean_script(clean_script: Path, root_dir: str, prefix_string: str) ->
     print(f"Updated {clean_script} with root_dir and prefix_string.")
 
 
-def parse_named_inputs(inputs) -> Tuple[Dict[str, str], list]:
-    named_inputs: Dict[str, str] = {}
-    positional_inputs = []
-    for token in inputs:
-        if "=" in token and not token.startswith("--"):
-            key, value = token.split("=", 1)
-            named_inputs[key.strip()] = value.strip()
-        else:
-            positional_inputs.append(token)
-    return named_inputs, positional_inputs
-
-
-def normalize_cli_inputs(args: argparse.Namespace) -> argparse.Namespace:
-    named_inputs, _ = parse_named_inputs(sys.argv[1:])
-    if named_inputs.get("project_code") and not args.project_code:
-        args.project_code = named_inputs["project_code"]
-    if named_inputs.get("object_name") and not args.object_name:
-        args.object_name = named_inputs["object_name"]
-    if named_inputs.get("observation_date") and not args.observation_date:
-        args.observation_date = named_inputs["observation_date"]
-    if named_inputs.get("url") and not args.url:
-        args.url = named_inputs["url"]
-
-    for attr in ("project_code", "object_name", "observation_date"):
-        value = getattr(args, attr)
-        if value and isinstance(value, str) and value.startswith("url="):
-            extracted_url = value.split("=", 1)[1].strip()
-            if extracted_url and not args.url:
-                args.url = extracted_url
-            setattr(args, attr, None)
-
-    # Handle split token form: "url= https://..."
-    if args.url in (None, ""):
-        positional_url = None
-        for attr in ("project_code", "object_name", "observation_date", "url_arg"):
-            value = getattr(args, attr, None)
-            if value and isinstance(value, str) and value.lower() == "url=":
-                setattr(args, attr, None)
-                continue
-            if value and isinstance(value, str) and value.startswith(("http://", "https://")):
-                positional_url = value
-                setattr(args, attr, None)
-                break
-        if positional_url:
-            args.url = positional_url
-
-    # Backward compatibility: old order was project object url observation_date.
-    if args.url in (None, "") and args.observation_date and args.url_arg:
-        if str(args.observation_date).startswith(("http://", "https://")):
-            args.url = args.observation_date
-            args.observation_date = args.url_arg
-            args.url_arg = None
-
-    if not args.url and args.url_arg:
-        if str(args.url_arg).startswith("url="):
-            args.url = str(args.url_arg).split("=", 1)[1]
-        elif str(args.url_arg).startswith(("http://", "https://")):
-            args.url = args.url_arg
-
-    return args
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -551,14 +489,9 @@ def parse_args() -> argparse.Namespace:
             "copy ASC templates, and patch prep/cleanup scripts."
         )
     )
-    parser.add_argument("project_code", nargs="?", help="Project code (e.g., 23A-241)")
-    parser.add_argument("object_name", nargs="?", help="Object name (e.g., AT2019ehz)")
-    parser.add_argument("observation_date", nargs="?", help="Observation date (e.g., 2023-07-22)")
-    parser.add_argument(
-        "url_arg",
-        nargs="?",
-        help="Optional URL argument, either raw URL or url=<value> after positional args",
-    )
+    parser.add_argument("--project-code", dest="project_code", help="Project code (e.g., 23A-241)")
+    parser.add_argument("--object-name", dest="object_name", help="Object name (e.g., AT2019ehz)")
+    parser.add_argument("--observation-date", dest="observation_date", help="Observation date (e.g., 2023-07-22)")
     parser.add_argument("--url", help="URL to download from")
     parser.add_argument("--asc", type=str, default="ASC", help="ASC template directory (default: ASC)")
     parser.add_argument("--a_config", action="store_true", help="Set A_config=True in prep script")
@@ -573,12 +506,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    args = normalize_cli_inputs(parse_args())
+    args = parse_args()
     logger = configure_logging(args.verbose, args.quiet)
 
     if not args.url:
         sys.exit(
-            "Usage error: URL must be provided with --url or positional url=<value> or raw URL argument."
+            "Usage error: URL must be provided with --url."
         )
 
     args.project_code = args.project_code or "unknown"

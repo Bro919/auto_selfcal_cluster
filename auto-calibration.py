@@ -16,6 +16,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
 
+from runtime.auto_image_compat import patch_auto_image_output_directory
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -649,6 +651,7 @@ def bootstrap_auto_image_workdir(
     auto_image_vla_dst = workdir / auto_image_vla_src.name
     print(f"Copying auto-image-VLA from {auto_image_vla_src} into {auto_image_vla_dst}")
     copy_tree(auto_image_vla_src, auto_image_vla_dst)
+    patch_auto_image_output_directory(auto_image_vla_dst)
 
     write_auto_image_config(
         auto_image_vla_dst,
@@ -999,6 +1002,7 @@ def run_auto_image_workflow(args: argparse.Namespace) -> None:
         auto_image_dir = bootstrap_auto_image_workdir(args, script_dir, workdir, ms_path)
         config_path = auto_image_dir / "config.yaml"
 
+    patch_auto_image_output_directory(auto_image_dir)
     auto_image_script = auto_image_dir / "run-auto-image.py"
 
     if args.auto_image_submit:

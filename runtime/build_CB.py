@@ -9,6 +9,8 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+from auto_image_compat import patch_auto_image_output_directory
+
 
 def configure_logging(verbose: bool, quiet: bool = False) -> logging.Logger:
     if quiet and not verbose:
@@ -571,6 +573,7 @@ def main() -> None:
     auto_image_vla_dst = workdir_path / auto_image_vla_src.name
     print(f"Copying auto-image-VLA from {auto_image_vla_src} into {auto_image_vla_dst}")
     copy_tree(auto_image_vla_src, auto_image_vla_dst)
+    patch_auto_image_output_directory(auto_image_vla_dst)
 
     expected_ms_path = compute_expected_ms_path(
         workdir_path,

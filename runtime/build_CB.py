@@ -496,7 +496,7 @@ def stage_observation_contents(downloaded_dir: Path, workdir_path: Path) -> str:
 
 
 def main() -> None:
-    args = normalize_cli_inputs(parse_args())
+    args = parse_args()
     logger = configure_logging(args.verbose, args.quiet)
 
     missing = []

@@ -963,8 +963,11 @@ def run_remote_mode(args: argparse.Namespace, logger: logging.Logger) -> None:
     build_cmd = [
         sys.executable,
         str(script_dir / "build_ASC.py"),
+        "--project-code",
         build_project_code,
+        "--object-name",
         build_object,
+        "--observation-date",
         build_date,
         "--url",
         args.url,

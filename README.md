@@ -92,9 +92,13 @@ python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip
 ```
 
 #### Running auto-image
-After CB calibration is submitted, the pipeline can chain auto-image automatically. You can also run auto-image manually on an existing .ms path:
+After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can also run auto-image manually on an existing .ms path:
 ```
 python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'
+```
+To submit imaging for an existing CB workdir as a Slurm job so that you don't have to wait with the terminal open:
+```
+python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-size 1000 --auto-image-submit
 ```
 
 ### Running ASC
@@ -166,247 +170,160 @@ If you need to change from or see the default of all the setting for flags here 
 
 
 ### General Flags
-```
---project-code
-```
+
+`--project-code`
 Project code, e.g. 23A-241, used for overwriting metadata-scarper
     
-```
---object-name
-```
+`--object-name`
 Object name, e.g. AT2019ehz, used for overwriting metadata-scarper
 
-```
---observation-date
-```
+`--observation-date`
 Observation date, e.g. 2023-07-22, used for overwriting metadata-scarper
 
-```
--v
---verbose
-```
+`-v`
+`--verbose`
 Enable verbose output and command tracing
 
-```
--q 
---quiet
-```
+`-q` 
+`--quiet`
 Reduce output to essential status/error messages
 
-```
---pipeline
-```
+`--pipeline`
 default = "cb-asc"
 Pipeline mode: cb, asc, cb-asc, or auto-image
 
-```
---url
-```
+`--url`
 Source URL/path; pipeline-specific behavior is inferred from --pipeline
 
-```
---dry-run
-```
+`--dry-run`
 Dry-run the combined workflow and print CB/ASC commands instead of executing them
 
 ### CB Flags
 
-```
---skip-cb
-```
+`--skip-cb`
 Skip CB build/prep and use --cb-workdir directly
 
-```
---cb-template
-```
+`--cb-template`
 Path to the CB template directory
 
-```
---cb-auto-image-vla
-```
+`--cb-auto-image-vla`
 Path to auto-image-VLA directory copied into CB working directories
 
-```
---asc-template
-```
+`--asc-template`
 Path to the ASC template directory
 
-```
---cb-temp-dir
-```
+`--cb-temp-dir`
 Optional temporary directory for CB downloads and extraction
 
-```
---cb-skip-submit
-```
+`--cb-skip-submit`
 Standalone CB mode: build and prepare the data but do not submit the calibration jobs. CB submission is enabled by default for CB-ASC mode
 
-```
---cb-submit
-```
+`--cb-submit`
 argparse.SUPPRESS, used for internal logic of running CB-ASC
     
-```
---cb-wait-seconds
-```
+`--cb-wait-seconds`
 default = 60
 Seconds between Slurm status checks when --cb-asc-wait-for-cb is used
 
-```
---cb-local-dataset
-```
+`--cb-local-dataset`
 Local extracted SDM-BDF dataset root for CB mode (use instead of --url)
 
-```
---cb-workdir
-```
+`--cb-workdir`
 Existing CB working directory to use instead of running build/prep"
 
 ### CB-ASC pipeline Flags, These are mostly for testing
 
-```
---cb-asc-wait-for-cb
-```
+`--cb-asc-wait-for-cb`
 In cb-asc mode (with CB submission enabled by default), wait in the foreground for CB completion before launching ASC. Default behavior submits ASC with a Slurm dependency and exits immediately
 
-```
---cb-asc-sbatch-time
-```
+`--cb-asc-sbatch-time`
 default = "2-00:00:00"
 SLURM wall time for dependency-submitted ASC follow-up job
 
-```
---cb-asc-sbatch-mem
-```
+`--cb-asc-sbatch-mem`
 default = "64G"
 SLURM memory request for dependency-submitted ASC follow-up job
 
-```
---cb-asc-sbatch-cpus
-```
+`--cb-asc-sbatch-cpus`
 SLURM CPU count for dependency-submitted ASC follow-up job
 
-```
---cb-asc-sbatch-partition
-```
+`--cb-asc-sbatch-partition`
 Optional SLURM partition for dependency-submitted ASC follow-up job
 
-```
---cb-asc-sbatch-account
-```
+`--cb-asc-sbatch-account`
 Optional SLURM account for dependency-submitted ASC follow-up job
 
 ### Auto-Image Flags
 
-```
---auto-image-workdir
-```
+`--auto-image-workdir`
 Existing working directory containing auto-image-VLA and config.yaml for standalone auto-image mode
 
-```
---auto-image-ms-path
-```
+`--auto-image-ms-path`
 Path to a local .ms directory (or parent directory containing one) used to bootstrap, makes a standalone auto-image working directory and config.yaml
 
-```
---auto-image-source-name
-```
+`--auto-image-source-name`
 Source name to write into auto-image-VLA/config.yaml, overwrites metadata-scraper
 
-```
---auto-image-size
-```
+`--auto-image-size`
 type = int
 default = 512
 image_size value written to auto-image-VLA/config.yaml
 
-```
---auto-image-split
-```
+`--auto-image-split`
 default = "both"
 choices = ["whole", "halves", "both"]
 split value written to auto-image-VLA/config.yaml
 
-```
---auto-image-submit
-```
+`--auto-image-submit`
 Submit auto-image via sbatch run_auto_image.sh instead of running CASA directly
     
-```
---auto-image-casa-executable
-```
+`--auto-image-casa-executable`
 default = "casa-pipe"
 CASA executable to use for standalone auto-image direct runs
 
 ### ASC Flags
 
-```
---asc-source-name
-```
+`--asc-source-name`
 Source name to write into ASC prep script, use this to overwrite the metadata-scraper 
 
-```
---asc-split-band
-```
+`--asc-split-band`
 default = "both"
 choices = ["whole", "halves", "both"]
 Split band strategy for ASC prep
 
-```
---asc-use-single-band
-```
+`--asc-use-single-band`
 Sets ASC prep to use only one frequency band, make sure to set the frequency band with `--asc-single-band`
 
-```
---asc-single-band
-```
+`--asc-single-band`
 default = "EVLA_C"
 Single band to use when asc-use-single-band is set, make sure to set `--asc-use-single-band` otherwise this flag won't do anything since it defaults to run all bands
 
-```
---asc-use-single-freq
-```
+`--asc-use-single-freq`
 Sets ASC prep to use only one frequency, make sure to set the frequency with `--asc-single-freq`
 
-```
---asc-single-freq
-```
+`--asc-single-freq`
 type = int
 default = 9
 Single frequency to use when asc-use-single-freq is set, make sure to set `--asc-use-single-freq` other this flag won't do anything since it defaults to run all frequencies
 
-```
---a-config
-```
+`--a-config`
 Enable A_config in the ASC prep script, this mostly just set memory request to be higher with less cores for specifically lower frequencies to improve completion chance
 
-```
---asc-auto-sc-dir"
-```
+`--asc-auto-sc-dir`
 Optional auto_selfcal repository path for ASC prep instead of using internal repo of auto_selfcal
 
-```
---asc-casa-executable
-```
+`--asc-casa-executable`
 default = "casa",
 CASA executable to use when ASC launches CASA non-interactively
 
-```
---asc-no-casa
-```
+`--asc-no-casa`
 Do not launch CASA for ASC prep; only patch the prep script, do not prepare to run
 
-```
---asc-skip-submit
-```
+`--asc-skip-submit`
 Do not submit ASC batch slurm jobs after CASA prep
 
-```    
---asc-dry-run
-```
+`--asc-dry-run`
 Dry-run the ASC workflow without executing CASA or submission, outputs will instead will be printed
 
-```
---asc-ms-path
-```
+`--asc-ms-path`
 Path to a local .ms directory or parent directory containing one (ASC mode, and optional bootstrap input for auto-image mode)

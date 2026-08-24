@@ -23,45 +23,44 @@ def parse_args():
             "Run CB, ASC, or CB->ASC calibration workflows from one entrypoint."
         )
     )
-    parser.add_argument("--project-code", dest="project_code", help="Project code, e.g. 23A-241")
-    parser.add_argument("--object-name", dest="object_name", help="Object name, e.g. AT2019ehz")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output and command tracing")
-    parser.add_argument("-q", "--quiet", action="store_true", help="Reduce output to essential status/error messages")
+    parser.add_argument("--project-code", dest="project_code", help="Override the inferred project code, e.g. 23A-241.")
+    parser.add_argument("--object-name", dest="object_name", help="Override the inferred target/object name, e.g. AT2019ehz.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed progress and subprocess commands.")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Show only essential progress and error messages; cannot be combined with --verbose.")
     parser.add_argument(
         "--pipeline",
         default="cb-asc",
         choices=["cb", "asc", "cb-asc", "auto-image"],
-        help="Pipeline mode: cb, asc, cb-asc, or auto-image (default: cb-asc)",
+        help="Workflow to run: cb (calibrate), asc (self-calibrate), cb-asc (both), or auto-image (default: cb-asc).",
     )
-    parser.add_argument("--observation-date", help="Observation date, e.g. 2023-07-22")
-    parser.add_argument("--url", help="Source URL/path; pipeline-specific behavior is inferred from --pipeline")
+    parser.add_argument("--observation-date", help="Override the inferred observation date, e.g. 2023-07-22.")
+    parser.add_argument("--url", help="Remote URL or local source path; expected input depends on --pipeline.")
     parser.add_argument(
         "--cb-local-dataset",
-        help="Local extracted SDM-BDF dataset root for CB mode (use instead of --url)",
+        help="Local extracted SDM-BDF dataset root for CB mode; use instead of --url for local CB input.",
     )
-    parser.add_argument("--cb-workdir", help="Existing CB working directory to use instead of running build/prep")
+    parser.add_argument("--cb-workdir", help="Existing CB workdir to reuse, instead of creating a new one.")
     parser.add_argument(
         "--asc-ms-path",
         help=(
-            "Path to a local .ms directory or parent directory containing one "
-            "(ASC mode, and optional bootstrap input for auto-image mode)"
+            "Local .ms directory or parent containing one for ASC input; also accepted as auto-image bootstrap input."
         ),
     )
-    parser.add_argument("--skip-cb", action="store_true", help="Skip CB build/prep and use --cb-workdir directly")
-    parser.add_argument("--cb-template", default="CB", help="Path to the CB template directory")
+    parser.add_argument("--skip-cb", action="store_true", help="Skip CB build/prep and use --cb-workdir directly.")
+    parser.add_argument("--cb-template", default="CB", help="CB template directory (default: CB).")
     parser.add_argument(
         "--cb-auto-image-vla",
         default="repo/auto-image-VLA",
-        help="Path to auto-image-VLA directory copied into CB working directories",
+        help="auto-image-VLA directory to copy into each CB workdir (default: repo/auto-image-VLA).",
     )
-    parser.add_argument("--asc-template", default="ASC", help="Path to the ASC template directory")
-    parser.add_argument("--cb-temp-dir", help="Optional temporary directory for CB downloads and extraction")
+    parser.add_argument("--asc-template", default="ASC", help="ASC template directory (default: ASC).")
+    parser.add_argument("--cb-temp-dir", help="Temporary directory for CB downloads and extraction.")
 
     parser.add_argument(
         "--cb-skip-submit",
         dest="cb_submit",
         action="store_false",
-        help="Skip CB batch job submission after build/prep.",
+        help="Standalone CB mode: build and prepare the data but do not submit the calibration jobs. CB submission is enabled by default.",
     )
     parser.add_argument(
         "--cb-submit",
@@ -73,146 +72,144 @@ def parse_args():
         "--cb-wait-seconds",
         type=int,
         default=60,
-        help="Polling interval in seconds when waiting for CB SLURM completion (default: 60).",
+        help="Seconds between Slurm status checks when --cb-asc-wait-for-cb is used (default: 60).",
     )
     parser.add_argument(
         "--cb-asc-wait-for-cb",
         action="store_true",
         help=(
-            "In cb-asc mode (with CB submission enabled by default), wait in the foreground for CB completion "
-            "before launching ASC. Default behavior submits ASC with a Slurm dependency "
-            "and exits immediately."
+            "In cb-asc mode, wait for CB to finish before launching ASC in this process. By default, submit ASC "
+            "as an afterok dependency and exit immediately."
         ),
     )
     parser.add_argument(
         "--cb-asc-sbatch-time",
         default="2-00:00:00",
-        help="SLURM wall time for dependency-submitted ASC follow-up job (default: 2-00:00:00).",
+        help="Slurm wall-time request for the dependency-submitted ASC follow-up job (default: 2-00:00:00).",
     )
     parser.add_argument(
         "--cb-asc-sbatch-mem",
         default="64G",
-        help="SLURM memory request for dependency-submitted ASC follow-up job (default: 64G).",
+        help="Slurm memory request for the dependency-submitted ASC follow-up job (default: 64G).",
     )
     parser.add_argument(
         "--cb-asc-sbatch-cpus",
         type=int,
         default=1,
-        help="SLURM CPU count for dependency-submitted ASC follow-up job (default: 1).",
+        help="Slurm CPU count for the dependency-submitted ASC follow-up job (default: 1).",
     )
     parser.add_argument(
         "--cb-asc-sbatch-partition",
         default=None,
-        help="Optional SLURM partition for dependency-submitted ASC follow-up job.",
+        help="Optional Slurm partition for the dependency-submitted ASC follow-up job.",
     )
     parser.add_argument(
         "--cb-asc-sbatch-account",
         default=None,
-        help="Optional SLURM account for dependency-submitted ASC follow-up job.",
+        help="Optional Slurm account for the dependency-submitted ASC follow-up job.",
     )
 
     parser.add_argument(
         "--auto-image-workdir",
-        help="Existing working directory containing auto-image-VLA and config.yaml for standalone auto-image mode.",
+        help="Existing workdir containing auto-image-VLA/config.yaml for standalone auto-image mode.",
     )
     parser.add_argument(
         "--auto-image-ms-path",
         help=(
-            "Path to a local .ms directory (or parent directory containing one) used to bootstrap "
-            "a standalone auto-image working directory and config.yaml"
+            "Local .ms directory or parent containing one; bootstrap a standalone auto-image workdir and config.yaml."
         ),
     )
     parser.add_argument(
         "--auto-image-source-name",
-        help="Source name to write into auto-image-VLA/config.yaml during bootstrap mode.",
+        help="Source name to write into auto-image-VLA/config.yaml, overriding metadata inference during bootstrap.",
     )
     parser.add_argument(
         "--auto-image-size",
         type=int,
         default=512,
-        help="image_size value written to auto-image-VLA/config.yaml in bootstrap mode (default: 512).",
+        help="image_size written to auto-image-VLA/config.yaml during bootstrap (default: 512).",
     )
     parser.add_argument(
         "--auto-image-split",
         type=str,
         default="both",
         choices=["whole", "halves", "both"],
-        help="split value written to auto-image-VLA/config.yaml in bootstrap mode (default: both).",
+        help="split value written to auto-image-VLA/config.yaml during bootstrap (default: both).",
     )
     parser.add_argument(
         "--auto-image-submit",
         action="store_true",
-        help="Submit auto-image via sbatch run_auto_image.sh instead of running CASA directly.",
+        help="Submit run_auto_image.sh with sbatch instead of running auto-image CASA directly.",
     )
     parser.add_argument(
         "--auto-image-casa-executable",
         default="casa-pipe",
-        help="CASA executable to use for standalone auto-image direct runs.",
+        help="CASA executable for standalone auto-image direct runs (default: casa-pipe).",
     )
-    parser.add_argument("--asc-source-name", help="Source name to write into ASC prep script")
+    parser.add_argument("--asc-source-name", help="Source name to write into the ASC prep script, overriding metadata inference.")
     parser.add_argument(
         "--asc-split-band",
         default="both",
         choices=["whole", "halves", "both"],
-        help="Split band strategy for ASC prep.",
+        help="ASC band split strategy: whole, halves, or both (default: both).",
     )
     parser.add_argument(
         "--asc-use-single-band",
         action="store_true",
-        help="Set use_single_band=True in ASC prep.",
+        help="Restrict ASC prep to one band; select that band with --asc-single-band.",
     )
     parser.add_argument(
         "--asc-single-band",
         default="EVLA_C",
-        help="Single band to use when asc-use-single-band is set.",
+        help="Band used with --asc-use-single-band (default: EVLA_C).",
     )
     parser.add_argument(
         "--asc-use-single-freq",
         action="store_true",
-        help="Set use_single_freq=True in ASC prep.",
+        help="Restrict ASC prep to one frequency; select it with --asc-single-freq.",
     )
     parser.add_argument(
         "--asc-single-freq",
         type=int,
         default=9,
-        help="Single frequency to use when asc-use-single-freq is set.",
+        help="Frequency index used with --asc-use-single-freq (default: 9).",
     )
     parser.add_argument(
         "--a-config",
         "--asc-a-config",
         dest="asc_a_config",
         action="store_true",
-        help="Enable A_config in the ASC prep script.",
+        help="Enable A-configuration ASC resource settings, using more memory and fewer cores for lower frequencies.",
     )
     parser.add_argument(
         "--asc-auto-sc-dir",
-        help="Optional auto_selfcal repository path for ASC prep.",
+        help="Optional auto_selfcal repository path to copy/use during ASC prep; otherwise use the bundled repository.",
     )
     parser.add_argument(
         "--asc-casa-executable",
         default="casa",
-        help="CASA executable to use when ASC launches CASA non-interactively.",
+        help="CASA executable for non-interactive ASC prep (default: casa).",
     )
     parser.add_argument(
         "--asc-no-casa",
         action="store_true",
-        help="Do not launch CASA for ASC prep; only patch the prep script.",
+        help="Patch the ASC prep script but do not launch CASA.",
     )
     parser.add_argument(
         "--asc-skip-submit",
         action="store_true",
-        help="Do not submit ASC batch jobs after CASA prep.",
+        help="Prepare ASC but do not submit its Slurm batch jobs.",
     )
     parser.add_argument(
         "--asc-dry-run",
         action="store_true",
-        help="Dry-run the ASC workflow without executing CASA or submission.",
+        help="Show the ASC commands without running CASA or submitting jobs.",
     )
 
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Dry-run the combined workflow and print CB/ASC commands instead of executing them.",
+        help="Show the selected workflow commands without executing CASA or submitting jobs.",
     )
     parser.set_defaults(cb_submit=True)
     return parser.parse_args(normalize_boolean_flag_values(sys.argv[1:]))

@@ -107,6 +107,23 @@ def iter_xml_files(root):
         yield path
 
 
+def iter_elements_by_local_name(root, name):
+    """Yield XML elements whose tag matches name with or without a namespace."""
+    suffix = "}" + name.lower()
+    for element in root.iter():
+        tag = element.tag
+        if isinstance(tag, str) and (tag.lower() == name.lower() or tag.lower().endswith(suffix)):
+            yield element
+
+
+def child_text(element, name):
+    for child in list(element):
+        tag = child.tag
+        if isinstance(tag, str) and (tag.lower() == name.lower() or tag.lower().endswith("}" + name.lower())):
+            return (child.text or "").strip()
+    return ""
+
+
 def search_project_code_in_sdm(root):
     candidate_pattern = re.compile(r"\b[0-9]{2}[A-Z]-[0-9]{3}\b")
     tag_patterns = [
@@ -142,9 +159,9 @@ def extract_sdm_bdf_object_name(root):
         try:
             tree = ET.parse(scan_file)
             scan_root = tree.getroot()
-            for row in scan_root.findall("row"):
-                scan_intent = (row.findtext("scanIntent") or "").upper()
-                source_name = (row.findtext("sourceName") or "").strip()
+            for row in iter_elements_by_local_name(scan_root, "row"):
+                scan_intent = child_text(row, "scanIntent").upper()
+                source_name = child_text(row, "sourceName")
                 if "OBSERVE_TARGET" in scan_intent and source_name:
                     target_names.append(source_name)
         except ET.ParseError:
@@ -153,16 +170,31 @@ def extract_sdm_bdf_object_name(root):
     if target_names:
         return target_names[0]
 
+    source_file = find_xml_file(root, "Source.xml")
+    if source_file is not None:
+        try:
+            tree = ET.parse(source_file)
+            source_root = tree.getroot()
+            source_names = [
+                child_text(row, "sourceName")
+                for row in iter_elements_by_local_name(source_root, "row")
+            ]
+            source_names = [name for name in source_names if name]
+            if source_names:
+                return source_names[0]
+        except ET.ParseError:
+            pass
+
     field_file = find_xml_file(root, "Field.xml")
     if field_file is not None:
         try:
             tree = ET.parse(field_file)
             field_root = tree.getroot()
             field_names = [
-                (row.findtext("fieldName") or "").strip()
-                for row in field_root.findall("row")
-                if row.findtext("fieldName")
+                child_text(row, "fieldName")
+                for row in iter_elements_by_local_name(field_root, "row")
             ]
+            field_names = [name for name in field_names if name]
             if field_names:
                 return field_names[-1]
         except ET.ParseError:
@@ -180,9 +212,9 @@ def extract_sdm_bdf_observation_date(root):
     try:
         tree = ET.parse(scan_file)
         scan_root = tree.getroot()
-        for row in scan_root.findall("row"):
-            start_time = row.findtext("startTime")
-            scan_intent = (row.findtext("scanIntent") or "").upper()
+        for row in iter_elements_by_local_name(scan_root, "row"):
+            start_time = child_text(row, "startTime")
+            scan_intent = child_text(row, "scanIntent").upper()
             if start_time is None:
                 continue
             parsed_date = parse_asdm_time(start_time)

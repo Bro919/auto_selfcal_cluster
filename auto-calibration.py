@@ -1305,6 +1305,7 @@ def submit_dependent_asc_job(args: argparse.Namespace, cb_workdir: Path, cb_fina
         "sbatch",
         "--dependency",
         f"afterok:{cb_final_job_id}",
+        "--kill-on-invalid-dep=yes",
         str(launcher_path),
     ])
     result = subprocess.run(

@@ -87,7 +87,13 @@ def main() -> int:
                 dependency_text = "<previous_job_id>"
             else:
                 dependency_text = previous_job_id
-            command.extend(["--dependency", f"afterok:{dependency_text}"])
+            command.extend(
+                [
+                    "--dependency",
+                    f"afterok:{dependency_text}",
+                    "--kill-on-invalid-dep=yes",
+                ]
+            )
 
         command.append(str(script_path))
 

@@ -220,7 +220,7 @@ def build_final_ms_rename_command(target_name):
             'source_ms=""',
             'for candidate in ./*.ms; do',
             '    candidate_name="${candidate#./}"',
-            '    if [ -d "$candidate" ] && [ "$candidate_name" != "mySDM.ms" ]; then',
+            '    if [ -d "$candidate" ] && [ "$candidate_name" != "mySDM.ms" ] && [ "$candidate_name" != "calibrators.ms" ]; then',
             '        if [ -n "$source_ms" ]; then',
             '            echo "Error: multiple exported .ms directories found; refusing to rename automatically." >&2',
             '            echo "Candidates: $source_ms and $candidate" >&2',

@@ -208,11 +208,13 @@ def build_casa_install_pandas_command(casa_executable):
     return f"{quoted_casa} --nogui -c {shlex.quote(python_code)}"
 
 
-def build_final_ms_rename_command(target_name):
+def build_final_ms_rename_command(target_name, project_code):
     target = shlex.quote(target_name)
+    project_prefix = shlex.quote(f"{project_code}.")
     return "\n".join(
         [
             f"target_ms={target}",
+            f"project_prefix={project_prefix}",
             'if [ -d "$target_ms" ]; then',
             '    echo "Final measurement set already exists: $target_ms"',
             '    exit 0',
@@ -220,15 +222,24 @@ def build_final_ms_rename_command(target_name):
             'source_ms=""',
             'for candidate in ./*.ms; do',
             '    candidate_name="${candidate#./}"',
-            '    if [ -d "$candidate" ] && [ "$candidate_name" != "mySDM.ms" ] && [ "$candidate_name" != "calibrators.ms" ]; then',
-            '        if [ -n "$source_ms" ]; then',
-            '            echo "Error: multiple exported .ms directories found; refusing to rename automatically." >&2',
-            '            echo "Candidates: $source_ms and $candidate" >&2',
-            '            exit 1',
-            '        fi',
+            '    if [ -d "$candidate" ] && [[ "$candidate_name" == "$project_prefix"* ]]; then',
             '        source_ms="$candidate"',
+            '        break',
             '    fi',
             'done',
+            'if [ -z "$source_ms" ]; then',
+            '    for candidate in ./*.ms; do',
+            '        candidate_name="${candidate#./}"',
+            '        if [ -d "$candidate" ] && [ "$candidate_name" != "mySDM.ms" ] && [ "$candidate_name" != "calibrators.ms" ] && [ "$candidate_name" != "finalcalibrators.ms" ]; then',
+            '            if [ -n "$source_ms" ]; then',
+            '                echo "Error: multiple exported .ms directories found; refusing to rename automatically." >&2',
+            '                echo "Candidates: $source_ms and $candidate" >&2',
+            '                exit 1',
+            '            fi',
+            '            source_ms="$candidate"',
+            '        fi',
+            '    done',
+            'fi',
             'if [ -z "$source_ms" ]; then',
             '    echo "Error: no final .ms directory found to rename." >&2',
             '    exit 1',
@@ -272,9 +283,11 @@ calibration_command = build_casa_command(
 workdir_name = workdir.name
 if workdir_name.startswith("CB."):
     final_ms_name = f"{workdir_name[3:]}.ms"
+    project_code = workdir_name[3:].split(".", 1)[0]
 else:
     final_ms_name = f"{workdir_name}.ms"
-final_ms_rename_command = build_final_ms_rename_command(final_ms_name)
+    project_code = workdir_name.split(".", 1)[0]
+final_ms_rename_command = build_final_ms_rename_command(final_ms_name, project_code)
 
 script_content = build_slurm_script(
     workdir=workdir,

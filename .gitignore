@@ -7,3 +7,6 @@ logs/
 
 # Local Slurm mail configuration
 slurm-mail.conf
+
+# Generated Python cache files
+runtime/__pycache__/

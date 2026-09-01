@@ -57,6 +57,17 @@ def main() -> int:
     with batch_list_path.open("r", encoding="utf-8") as batch_file:
         scripts = [line.strip() for line in batch_file if line.strip()]
 
+    deduped_scripts = []
+    seen = set()
+    for script_path in scripts:
+        resolved = str(Path(script_path).expanduser().resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        deduped_scripts.append(resolved)
+
+    scripts = deduped_scripts
+
     if not scripts:
         print(f"Error: no SBATCH scripts found in {batch_list_path}", file=sys.stderr)
         return 1

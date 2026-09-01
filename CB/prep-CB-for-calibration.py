@@ -251,11 +251,32 @@ def build_final_ms_rename_command(target_name, project_code):
 
 
 def write_batch_list(batch_file, paths, append=False):
-    mode = "a" if append else "w"
     batch_path = Path(batch_file).expanduser().resolve()
     batch_path.parent.mkdir(parents=True, exist_ok=True)
+
+    unique_paths = []
+    seen = set()
+    for script_path in paths:
+        resolved = str(Path(script_path).expanduser().resolve())
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_paths.append(resolved)
+
+    if append and batch_path.exists():
+        with batch_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                candidate = line.strip()
+                if not candidate:
+                    continue
+                resolved = str(Path(candidate).expanduser().resolve())
+                if resolved not in seen:
+                    seen.add(resolved)
+                    unique_paths.append(resolved)
+
+    mode = "w"
     with batch_path.open(mode, encoding="utf-8") as handle:
-        for script_path in paths:
+        for script_path in unique_paths:
             handle.write(script_path + "\n")
 
 

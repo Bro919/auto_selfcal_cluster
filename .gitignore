@@ -1,0 +1,9 @@
+# Generated pipeline directories created at runtime
+ASC.*/
+CB.*/
+
+# Local runtime logs
+logs/
+
+# Local Slurm mail configuration
+slurm-mail.conf

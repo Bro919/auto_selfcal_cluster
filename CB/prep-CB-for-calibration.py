@@ -292,8 +292,9 @@ if not casa_script_path.exists():
     sys.exit(1)
 
 job_name = f"CalibrationPipeline-{workdir.name}"
-output = f"{job_name}.out"
-error = f"{job_name}.err"
+# Use absolute paths for SLURM output/error to ensure logs are written on reruns
+output = str(workdir / f"{job_name}.out")
+error = str(workdir / f"{job_name}.err")
 job_script_path = workdir / JOB_SCRIPT_NAME
 
 calibration_command = build_casa_command(
@@ -346,8 +347,9 @@ if ENABLE_AUTO_IMAGE_FOLLOWUP:
     auto_image_script_path = workdir / AUTO_IMAGE_DIR / AUTO_IMAGE_SCRIPT
     if auto_image_script_path.exists():
         auto_job_name = f"{AUTO_IMAGE_JOB_NAME_PREFIX}-{workdir.name}"
-        auto_output = f"{auto_job_name}.out"
-        auto_error = f"{auto_job_name}.err"
+        # Use absolute paths for SLURM output/error to ensure logs are written on reruns and dependency chains
+        auto_output = str(workdir / f"{auto_job_name}.out")
+        auto_error = str(workdir / f"{auto_job_name}.err")
         auto_job_script_path = workdir / AUTO_IMAGE_JOB_SCRIPT_NAME
         auto_image_command = build_casa_command(
             casa_executable=CASA_EXECUTABLE,

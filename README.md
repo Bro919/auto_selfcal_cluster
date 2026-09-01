@@ -1,27 +1,27 @@
 # RUNNING INITIAL CALIBRATION OR AUTO SELF-CALIBRATION
-Many of the initial Auto-Selfcal scripts are forked from the work done by Jimmy Lynch (https://github.com/jlynch2195/auto_selfcal_cluster), and this repo also uses his auto-image-VLA (https://github.com/jlynch2195/auto-image-VLA) as a submodule. As Jimmy mentions in his REAdME, this also uses the auto_selfcal code developed by Patrick Sheehan and his team (https://github.com/psheehan/auto_selfcal), so full credit goes to them for the basis of the ASC pipeline of this project. Unlike Jimmy's original project, Patrick Sheehan's work is installed here as a submodule, so no extra installation step is needed. This project also makes use of the CASA calibration pipeline script supplied by NRAO.
+Many of the initial Auto-Selfcal scripts are forked from the work done by Jimmy Lynch (https://github.com/jlynch2195/auto_selfcal_cluster), and this repo also uses his auto-image-VLA (https://github.com/jlynch2195/auto-image-VLA) as a submodule. As Jimmy mentions in his README, this also uses the auto_selfcal code developed by Patrick Sheehan and his team (https://github.com/psheehan/auto_selfcal), so full credit goes to them for the basis of the ASC pipeline of this project. Unlike Jimmy's original project, Patrick Sheehan's work is installed here as a submodule, so no extra installation step is needed. This project also makes use of the CASA calibration pipeline script supplied by NRAO.
 
 This repo is set up as an automation wrapper around their code, with the use case of the NRAO cluster and Talapas specifically in mind.
 
-My main use case has been on the NRAO cluster. Read through Jimmy's repo to get an idea of how to request access and make basic use of the cluster. He also comments on best use cases and how his scripts make use of Patrick Sheehan's work. I recommend fully reading Jimmy's README before this one since I skip many of the points he already covers. If this README has drifted from Jimmy's, his original one is still inside the ASC directory.
+My main use case has been on the NRAO cluster. Read through Jimmy's repo to get an idea of how to request access and make basic use of the cluster. He also comments on best use cases and how his scripts make use of Patrick Sheehan's work. I recommend reading Jimmy's README before this one since I skip many of the points he already covers. If this README has drifted from Jimmy's, his original one is still inside the ASC directory.
 
 ## Making use of auto-calibration
 The main wrapper you should use is auto-calibration.py in the top-level directory. It calls scripts/wrappers in the ASC, CB, and runtime directories. It handles downloading, setting up a working directory, preparing data, and submitting Slurm jobs. It also deals with infering information about the dataset given to properly name the working directory.
 
 It can handle:
-- SDM-BDF datasets for initial calibration (CB) to create a .ms directory
+- SDM-BDF datasets for initial calibration (CB) to create an .ms directory
 - Auto-SelfCal (ASC) on an existing .ms directory
 - Chaining CB directly into ASC
 - Standalone auto-image runs
 - Infers: Project Code, Object name and Observation data
 
-auto-calibration has a lot of flags and parameters for customization. Leave them at defaults unless you know exactly what you want to change.
+auto-calibration has a lot of flags and parameters for customization. Leave them at defaults unless you know exactly what you want to change, but they are also listed at the bottem of the page for reference.
 
 # Setup
 Since I have mostly run this project on the cluster, that is what I default to here.
 
 You need to request account access with NRAO to use the cluster. They will give you an nm member number that you use to log in.
-Then open your terminal and use `ssh nm-XXXXX@guest-login.aoc.nrao.edu` to log in with your NRAO account password.
+Then open your terminal and use `ssh nm-XXXXX@guest-login.aoc.nrao.edu` to log in with your NRAO account password. Jimmy breaks down better how to request account so check out his README for a better breakdown.
 
 ### OS consideration
 One important consideration is your OS.
@@ -68,7 +68,7 @@ NRAO will process your request and email you a link to the directory.
 After requesting data and receiving the link, you can run auto-calibration.
 
 IMPORTANT:
-ASC can create many Slurm jobs, and A-config runs can take around 7-10 days. With common settings (split=both across multiple bands), you can see around 12 frequency jobs plus one cleanup job. Do not run multiple heavy ASC datasets at once.
+ASC can create many Slurm jobs, and A-config runs can take around 7-10 days. With common settings (split=both across multiple bands), you can see around 12 frequency jobs plus one cleanup job. Do not run multiple heavy ASC datasets at once, as resoucres are limited. It's a good rule of thumb to only be running ONE ASC job at a time.
 
 CB typically submits two chained jobs (calibration, then auto-image) when auto-image is available, and it is usually done within a day.
 
@@ -81,9 +81,9 @@ For CB:
 python auto-calibration.py --pipeline cb --url 'your-link-goes-here'
 ```
 
-If your SDM-BDF source is local (not a URL), still use --url, but point it to the local path:
+If your SDM-BDF source is local:
 ```
-python auto-calibration.py --pipeline cb --url '/path/to/local/SDM-BDF-or-observation-dir'
+python auto-calibration.py --pipeline cb --cb-local-dataset '/path/to/local/SDM-BDF-or-observation-dir'
 ```
 
 Only use --skip-cb if you already have a prepared CB working directory and want to reuse it without rebuilding:
@@ -92,14 +92,15 @@ python auto-calibration.py --pipeline cb --cb-workdir 'path-to-directory' --skip
 ```
 
 #### Running auto-image
-After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can also run auto-image manually on an existing .ms path:
+After CB calibration is submitted, the pipeline will chain auto-image automatically. Depending on the size you set (default is 512px) it can take awhile to run. You can change the image size with `--auto-image-size`, since this is the most likly reason for rerunning auto-image. I suggest running the SLURM job version since the image is likely to be large and could take a while. You can also run auto-image manually on an existing .ms path without SLURM:
 ```
 python auto-calibration.py --pipeline auto-image --asc-ms-path 'path-to-directory'
 ```
 To submit imaging for an existing CB workdir as a Slurm job so that you don't have to wait with the terminal open:
 ```
-python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-size 1000 --auto-image-submit
+python auto-calibration.py --pipeline auto-image --auto-image-workdir 'CB.project.target.date' --auto-image-submit
 ```
+All images will be put in a folder in the given CB/ASC directory called images and then sorted by the size of the image. Whenever you run auto-image it'll also generate an imfitresults.csv for the set on images generated. That can be found in the imfitresults folder along side the images folder.
 
 ### Running ASC
 For ASC:
@@ -112,7 +113,7 @@ If it is ASC on A-config, use --a-config. This adjusts L/S band resources to red
 python auto-calibration.py --pipeline asc --url 'your-link-goes-here' --a-config
 ```
 
-If you already ran CB and now want ASC, point to the directory instead of giving a URL:
+If you already ran CB and now want ASC, point to the directory instead of giving a URL. This also works for running ASC on any local .ms:
 ```
 python auto-calibration.py --pipeline asc --asc-ms-path 'path-to-directory'
 ```
@@ -189,7 +190,7 @@ Enable verbose output and command tracing
 Reduce output to essential status/error messages
 
 `--pipeline`
-default = "cb-asc"
+default = "cb-asc",
 Pipeline mode: cb, asc, cb-asc, or auto-image
 
 `--url`
@@ -222,7 +223,7 @@ Standalone CB mode: build and prepare the data but do not submit the calibration
 argparse.SUPPRESS, used for internal logic of running CB-ASC
     
 `--cb-wait-seconds`
-default = 60
+default = 60,
 Seconds between Slurm status checks when --cb-asc-wait-for-cb is used
 
 `--cb-local-dataset`
@@ -237,11 +238,11 @@ Existing CB working directory to use instead of running build/prep"
 In cb-asc mode (with CB submission enabled by default), wait in the foreground for CB completion before launching ASC. Default behavior submits ASC with a Slurm dependency and exits immediately
 
 `--cb-asc-sbatch-time`
-default = "2-00:00:00"
+default = "2-00:00:00",
 SLURM wall time for dependency-submitted ASC follow-up job
 
 `--cb-asc-sbatch-mem`
-default = "64G"
+default = "64G",
 SLURM memory request for dependency-submitted ASC follow-up job
 
 `--cb-asc-sbatch-cpus`
@@ -265,20 +266,20 @@ Path to a local .ms directory (or parent directory containing one) used to boots
 Source name to write into auto-image-VLA/config.yaml, overwrites metadata-scraper
 
 `--auto-image-size`
-type = int
-default = 512
+type = int,
+default = 512,
 image_size value written to auto-image-VLA/config.yaml
 
 `--auto-image-split`
-default = "both"
-choices = ["whole", "halves", "both"]
+default = "both",
+choices = ["whole", "halves", "both"],
 split value written to auto-image-VLA/config.yaml
 
 `--auto-image-submit`
 Submit auto-image via sbatch run_auto_image.sh instead of running CASA directly
     
 `--auto-image-casa-executable`
-default = "casa-pipe"
+default = "casa-pipe",
 CASA executable to use for standalone auto-image direct runs
 
 ### ASC Flags
@@ -287,23 +288,23 @@ CASA executable to use for standalone auto-image direct runs
 Source name to write into ASC prep script, use this to overwrite the metadata-scraper 
 
 `--asc-split-band`
-default = "both"
-choices = ["whole", "halves", "both"]
+default = "both",
+choices = ["whole", "halves", "both"],
 Split band strategy for ASC prep
 
 `--asc-use-single-band`
 Sets ASC prep to use only one frequency band, make sure to set the frequency band with `--asc-single-band`
 
 `--asc-single-band`
-default = "EVLA_C"
+default = "EVLA_C",
 Single band to use when asc-use-single-band is set, make sure to set `--asc-use-single-band` otherwise this flag won't do anything since it defaults to run all bands
 
 `--asc-use-single-freq`
 Sets ASC prep to use only one frequency, make sure to set the frequency with `--asc-single-freq`
 
 `--asc-single-freq`
-type = int
-default = 9
+type = int,
+default = 9,
 Single frequency to use when asc-use-single-freq is set, make sure to set `--asc-use-single-freq` other this flag won't do anything since it defaults to run all frequencies
 
 `--a-config`

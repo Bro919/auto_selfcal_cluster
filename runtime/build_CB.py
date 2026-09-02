@@ -501,20 +501,14 @@ def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: loggin
 
 
 def stage_observation_contents(downloaded_dir: Path, workdir_path: Path) -> str:
-    print(f"Copying contents of observation directory {downloaded_dir} into {workdir_path}")
-    copied_names: List[str] = []
+    observation_name = "mySDM"
+    destination = workdir_path / observation_name
+    print(f"Copying observation directory {downloaded_dir} into {destination}")
 
-    for item in downloaded_dir.iterdir():
-        destination = workdir_path / item.name
-        if item.is_dir():
-            shutil.copytree(str(item), str(destination), symlinks=True)
-        else:
-            shutil.copy2(str(item), str(destination), follow_symlinks=False)
-        copied_names.append(item.name)
-
-    if len(copied_names) == 1 and (workdir_path / copied_names[0]).is_dir():
-        return copied_names[0]
-    return "."
+    if destination.exists():
+        shutil.rmtree(str(destination))
+    shutil.copytree(str(downloaded_dir), str(destination), symlinks=True)
+    return observation_name
 
 
 def main() -> None:

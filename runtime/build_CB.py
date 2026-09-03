@@ -500,8 +500,14 @@ def resolve_observation_dir_from_remote(url: str, temp_dir: Path, logger: loggin
     )
 
 
-def stage_observation_contents(downloaded_dir: Path, workdir_path: Path) -> str:
-    observation_name = "mySDM"
+def stage_observation_contents(
+    downloaded_dir: Path,
+    workdir_path: Path,
+    project_code: str,
+    object_name: str,
+    observation_date: str,
+) -> str:
+    observation_name = f"{project_code}.{object_name}.{observation_date}.asdm"
     destination = workdir_path / observation_name
     print(f"Copying observation directory {downloaded_dir} into {destination}")
 
@@ -575,7 +581,13 @@ def main() -> None:
         except Exception as exc:
             sys.exit(f"Error: {exc}")
 
-        observation_subdir_name = stage_observation_contents(downloaded_dir, workdir_path)
+        observation_subdir_name = stage_observation_contents(
+            downloaded_dir,
+            workdir_path,
+            args.project_code,
+            args.object_name,
+            args.observation_date,
+        )
 
     if not cb_template_src.exists():
         sys.exit(f"Error: CB template directory {cb_template_src} does not exist.")
